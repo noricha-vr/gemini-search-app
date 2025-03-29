@@ -8,6 +8,7 @@ import logging # logging をインポート
 from utils.markdown_export import export_message_to_markdown # <-- インポートを追加
 from database.crud import search_messages, delete_thread, update_thread_name, delete_project # <-- delete_project をインポート
 from sqlalchemy import func
+from utils.csv_export import get_all_data_as_dataframe, generate_csv_data # <-- CSVエクスポート関数をインポート
 
 # logging の基本設定
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -226,6 +227,25 @@ try:
             # st.session_state.current_thread_id = ... (保持していた場合)
             st.rerun()
     # --- 検索機能ここまで ---
+
+    # --- CSVエクスポート機能 --- 
+    st.sidebar.divider()
+    st.sidebar.header("エクスポート")
+
+    # ダウンロードボタン表示前にデータを準備
+    df_export = get_all_data_as_dataframe(db) 
+    csv_data = generate_csv_data(df_export)
+
+    if csv_data:
+        st.sidebar.download_button(
+            label="全データをCSVでダウンロード",
+            data=csv_data,
+            file_name="gemini_search_chat_export.csv",
+            mime="text/csv",
+            key="download_csv_button"
+        )
+    else:
+        st.sidebar.warning("エクスポートするデータがありません。")
 
 finally:
     db.close()
