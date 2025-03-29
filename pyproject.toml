@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "dotenv>=0.9.9",
     "google-genai>=1.8.0",
     "sqlalchemy>=2.0.40",
     "streamlit>=1.44.0",

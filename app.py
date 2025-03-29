@@ -1,6 +1,8 @@
 import streamlit as st
 from database.database import SessionLocal, init_db
-from models.models import Project, Thread
+from models.models import Project, Thread, Message
+from api.gemini_client import GeminiClient
+import datetime
 
 # --- データベース初期化 ---
 init_db()
@@ -126,7 +128,69 @@ if st.session_state.current_project_id:
                 current_thread = db.query(Thread).filter(Thread.id == st.session_state.current_thread_id).first()
                 if current_thread:
                     st.write(f"スレッド: {current_thread.name}")
-                    # TODO: チャット機能 (要件 2.3) - メッセージ表示と入力フォーム
+                    
+                    # --- チャット履歴の表示 ---
+                    messages = db.query(Message).filter(Message.thread_id == current_thread.id).order_by(Message.created_at).all()
+                    for msg in messages:
+                        with st.chat_message(msg.role):
+                            st.markdown(msg.content) # マークダウンとして表示
+
+                    # --- チャット入力 ---
+                    if prompt := st.chat_input("メッセージを入力してください"):
+                        # 1. ユーザーメッセージを表示し、DBに保存
+                        with st.chat_message("user"):
+                            st.markdown(prompt)
+                        
+                        user_message = Message(thread_id=current_thread.id, role="user", content=prompt)
+                        db.add(user_message)
+                        
+                        # スレッドの最終更新日時を更新
+                        current_thread.updated_at = datetime.datetime.utcnow()
+                        db.add(current_thread)
+                        
+                        db.commit() 
+                        # db.refresh(user_message) # 必要なら
+
+                        # 2. Gemini API 呼び出し準備
+                        #    - 履歴を API 用の形式に変換 (システムプロンプトは別途渡す)
+                        history_for_api = []
+                        for m in messages: # DBから取得したメッセージ + 今追加したユーザーメッセージ
+                             history_for_api.append({'role': m.role, 'parts': [m.content]})
+                        history_for_api.append({'role': 'user', 'parts': [prompt]}) # 最新のユーザー入力を追加
+
+                        # 3. Gemini API 呼び出しと応答表示 (ストリーミング)
+                        try:
+                            client = GeminiClient(model_name=current_project.model_name)
+                            with st.chat_message("assistant"):
+                                # ストリーミング応答を表示するプレースホルダー
+                                response_placeholder = st.empty() 
+                                full_response = ""
+                                # st.write_stream を使用してストリーミング表示
+                                stream = client.generate_content_stream(
+                                    history=history_for_api, 
+                                    system_prompt=current_project.system_prompt
+                                )
+                                for chunk in stream:
+                                    full_response += chunk
+                                    response_placeholder.markdown(full_response + "▌") # カーソル風の表示
+                                response_placeholder.markdown(full_response) # 最終的な応答を表示
+
+                            # 4. アシスタントの応答をDBに保存
+                            assistant_message = Message(thread_id=current_thread.id, role="assistant", content=full_response)
+                            db.add(assistant_message)
+                            
+                            # スレッドの最終更新日時を再度更新
+                            current_thread.updated_at = datetime.datetime.utcnow()
+                            db.add(current_thread)
+
+                            db.commit()
+                            # st.rerun() # 応答後に再実行すると入力が消えるので不要かも
+
+                        except Exception as e:
+                            st.error(f"Gemini API の呼び出し中にエラーが発生しました: {e}")
+                            # エラー発生時はロールバックした方が良い場合もある
+                            # db.rollback() 
+
                 else:
                     st.warning("選択されたスレッドが見つかりません。")
                     st.session_state.current_thread_id = None # リセット

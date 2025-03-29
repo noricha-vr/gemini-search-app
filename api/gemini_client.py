@@ -1,6 +1,5 @@
 import os
-import google.generativeai as genai
-from google.generativeai.types import ContentType, PartType
+from google import genai
 from dotenv import load_dotenv
 
 load_dotenv() # .envファイルから環境変数を読み込む
@@ -26,7 +25,7 @@ class GeminiClient:
         configure_genai() # 初期化時に設定を確認・実行
         self.model = genai.GenerativeModel(model_name)
 
-    def generate_content(self, history: list[ContentType], system_prompt: str | None = None) -> str:
+    def generate_content(self, history: list, system_prompt: str | None = None) -> str:
         """
         指定された履歴とシステムプロンプトに基づいてコンテンツを生成します。
 
@@ -69,7 +68,7 @@ class GeminiClient:
             # ここでエラーを再raiseするか、デフォルトの応答を返すか、または特定の処理を行う
             raise # or return "エラーが発生しました。"
 
-    def generate_content_stream(self, history: list[ContentType], system_prompt: str | None = None):
+    def generate_content_stream(self, history: list, system_prompt: str | None = None):
         """
         指定された履歴とシステムプロンプトに基づいてコンテンツをストリーミング生成します。
 
