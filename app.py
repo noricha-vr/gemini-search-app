@@ -1,6 +1,6 @@
 import streamlit as st
 from database.database import SessionLocal, init_db
-from models.models import Project
+from models.models import Project, Thread
 
 # --- データベース初期化 ---
 init_db()
@@ -10,6 +10,13 @@ if "current_project_id" not in st.session_state:
     st.session_state.current_project_id = None
 if "current_thread_id" not in st.session_state:
     st.session_state.current_thread_id = None
+
+# --- 定数 --- # モデルリストを定義
+AVAILABLE_MODELS = [
+    "gemini-2.0-flash", # 消さない
+    "gemini-2.0-pro-exp-02-05", # 消さない
+    "gemini-2.5-pro-exp-03-25" # 消さない
+]
 
 # --- サイドバー --- 
 st.sidebar.title("Gemini Search Chat")
@@ -28,44 +35,85 @@ try:
         "プロジェクトを選択", 
         project_names,
         index=project_names.index(next((p.name for p in projects if p.id == st.session_state.current_project_id), None)) if st.session_state.current_project_id and any(p.id == st.session_state.current_project_id for p in projects) else 0,
-        # disabled=not projects # プロジェクトがない場合も新規作成があるので disabled にしない
     )
 
     if selected_project_name:
+        # プロジェクトが切り替わったらスレッド選択もリセット
+        if st.session_state.current_project_id != project_map[selected_project_name]:
+             st.session_state.current_thread_id = None 
         st.session_state.current_project_id = project_map[selected_project_name]
+
     else:
-        st.session_state.current_project_id = None # プロジェクトがない場合など
+        st.session_state.current_project_id = None
+        st.session_state.current_thread_id = None
 
     # 新規プロジェクト作成
     with st.sidebar.expander("新しいプロジェクトを作成"): 
         new_project_name = st.text_input("プロジェクト名")
         new_system_prompt = st.text_area("システムプロンプト", value="あなたは役立つアシスタントです。")
-        # TODO: モデル選択を追加 (要件 2.1)
+        # モデル選択を追加 (要件 2.1)
+        selected_model = st.selectbox("使用するモデルを選択", AVAILABLE_MODELS, index=0)
+        
         if st.button("作成"):
-            if new_project_name:
+            if new_project_name and selected_model:
                 # 同じ名前のプロジェクトがないか確認
                 existing_project = db.query(Project).filter(Project.name == new_project_name).first()
                 if not existing_project:
                     new_project = Project(
                         name=new_project_name, 
                         system_prompt=new_system_prompt,
-                        # model_name= # TODO: モデル選択の値を入れる
+                        model_name=selected_model # モデル選択の値を入れる
                     )
                     db.add(new_project)
                     db.commit()
-                    st.session_state.current_project_id = new_project.id # 作成したプロジェクトを選択状態にする
                     db.refresh(new_project) # IDを取得するためにリフレッシュ
+                    st.session_state.current_project_id = new_project.id # 作成したプロジェクトを選択状態にする
+                    st.session_state.current_thread_id = None # 新規プロジェクト作成時はスレッド未選択
                     st.sidebar.success(f"プロジェクト '{new_project_name}' を作成しました！")
                     st.rerun() # サイドバーの表示を更新
                 else:
                     st.sidebar.error("同じ名前のプロジェクトが既に存在します。")
             else:
-                st.sidebar.warning("プロジェクト名を入力してください。")
+                st.sidebar.warning("プロジェクト名とモデルを選択してください。")
+
+    # --- スレッド管理 --- (プロジェクトが選択されている場合のみ表示)
+    if st.session_state.current_project_id:
+        st.sidebar.header("スレッド")
+        current_project_id = st.session_state.current_project_id
+        threads = db.query(Thread).filter(Thread.project_id == current_project_id).order_by(Thread.updated_at.desc()).all()
+        thread_names = [t.name for t in threads]
+        thread_map = {t.name: t.id for t in threads}
+
+        # 新規スレッド作成ボタン
+        if st.sidebar.button("新しいスレッドを開始"): 
+            new_thread = Thread(project_id=current_project_id, name=f"新しいスレッド {len(threads) + 1}") # 仮の名前
+            db.add(new_thread)
+            db.commit()
+            db.refresh(new_thread)
+            st.session_state.current_thread_id = new_thread.id
+            st.sidebar.success("新しいスレッドを開始しました！")
+            st.rerun()
+
+        # スレッド選択
+        selected_thread_name = st.sidebar.selectbox(
+            "スレッドを選択",
+            thread_names,
+            index=thread_names.index(next((t.name for t in threads if t.id == st.session_state.current_thread_id), None)) if st.session_state.current_thread_id and any(t.id == st.session_state.current_thread_id for t in threads) else 0,
+            # disabled=not threads # スレッドがなくても新規作成があるので disabled にしない
+        )
+
+        if selected_thread_name:
+            st.session_state.current_thread_id = thread_map[selected_thread_name]
+        elif threads: # スレッドが存在するのに選択されていない場合（初期状態など）
+             st.session_state.current_thread_id = threads[0].id # 最新のスレッドをデフォルトで選択
+        else:
+            st.session_state.current_thread_id = None
+
 finally:
     db.close()
 
 # --- メインコンテンツエリア --- 
-st.title("Chat") # 仮タイトル
+st.title("Chat")
 
 if st.session_state.current_project_id:
     db = SessionLocal()
@@ -73,11 +121,21 @@ if st.session_state.current_project_id:
         current_project = db.query(Project).filter(Project.id == st.session_state.current_project_id).first()
         if current_project:
             st.subheader(f"プロジェクト: {current_project.name}")
-            # TODO: スレッド管理機能 (要件 2.2)
-            # TODO: チャット機能 (要件 2.3)
+            
+            if st.session_state.current_thread_id:
+                current_thread = db.query(Thread).filter(Thread.id == st.session_state.current_thread_id).first()
+                if current_thread:
+                    st.write(f"スレッド: {current_thread.name}")
+                    # TODO: チャット機能 (要件 2.3) - メッセージ表示と入力フォーム
+                else:
+                    st.warning("選択されたスレッドが見つかりません。")
+                    st.session_state.current_thread_id = None # リセット
+            else:
+                st.info("サイドバーからスレッドを選択または作成してください。")
         else:
             st.warning("選択されたプロジェクトが見つかりません。サイドバーからプロジェクトを選択または作成してください。")
-            st.session_state.current_project_id = None # 見つからない場合はリセット
+            st.session_state.current_project_id = None
+            st.session_state.current_thread_id = None
     finally:
         db.close()
 else:
