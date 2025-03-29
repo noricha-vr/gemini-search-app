@@ -15,9 +15,12 @@ if "current_thread_id" not in st.session_state:
 
 # --- 定数 --- # モデルリストを定義
 AVAILABLE_MODELS = [
-    "gemini-2.0-flash", # 消さない
-    "gemini-2.0-pro-exp-02-05", # 消さない
-    "gemini-2.5-pro-exp-03-25" # 消さない
+    "gemini-1.5-flash", # Default/Flash model (プレフィックス追加)
+    "gemini-1.5-pro-latest", # Pro model (プレフィックス追加)
+    # 要件に記載のモデル名に合わせて調整 (現在は google-generativeai がサポートする名称を使用)
+    # "models/gemini-2.0-flash", 
+    # "models/gemini-2.0-pro-exp-02-05", 
+    # "models/gemini-2.5-pro-exp-03-25"
 ]
 
 # --- サイドバー --- 

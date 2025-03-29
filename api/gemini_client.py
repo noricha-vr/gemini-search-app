@@ -68,12 +68,6 @@ class GeminiClient:
             print(f"Gemini API呼び出し中にエラーが発生しました: {e}")
             raise
 
-    def _prepare_model_name(self, model_name: str) -> str:
-        """モデル名に 'models/' プレフィックスがなければ付与します。"""
-        if not model_name.startswith("models/"):
-            return f"models/{model_name}"
-        return model_name
-
     def generate_content_stream(self, 
                               model_name: str,
                               history: List[types.Content],
@@ -92,7 +86,7 @@ class GeminiClient:
         Raises:
             Exception: API呼び出し中にエラーが発生した場合。
         """
-        processed_model_name = self._prepare_model_name(model_name)
+        processed_model_name = model_name
 
         system_instruction_part = None
         if system_prompt:
