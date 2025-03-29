@@ -93,8 +93,12 @@ class GeminiClient:
              # サンプルに従い Part.from_text を使用 -> エラーのため元に戻す
             system_instruction_part = types.Part(text=system_prompt)
  
+        tools = [
+            types.Tool(google_search=types.GoogleSearch())
+        ]
         # GenerationConfig を設定
         generation_config = types.GenerateContentConfig(
+            tools=tools,
             # response_mime_type="text/plain" # 必要に応じて設定
             # サンプルに従い、system_instruction はリストで渡す
             system_instruction=[system_instruction_part] if system_instruction_part else None
