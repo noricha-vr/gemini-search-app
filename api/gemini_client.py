@@ -1,36 +1,38 @@
 import os
-from google import genai
+# `google.generativeai` は `genai` としてインポートするのが一般的
+from google import genai 
+# `types` も明示的にインポート
+from google.genai import types 
 from dotenv import load_dotenv
+from typing import List, Generator, Optional # 型ヒントをより明確に
 
 load_dotenv() # .envファイルから環境変数を読み込む
 
-def configure_genai():
-    """環境変数からAPIキーを読み込み、Geminiクライアントを設定します。"""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEYが設定されていません。 .envファイルを確認してください。")
-    genai.configure(api_key=api_key)
-
-
 class GeminiClient:
-    """Gemini APIとの通信を行うクライアントクラス"""
+    """Gemini APIとの通信を行うクライアントクラス (gemini-sample.py ベース)"""
 
-    def __init__(self, model_name: str = "gemini-1.5-flash"):
+    def __init__(self):
         """
         GeminiClientを初期化します。
+        APIキーを環境変数から読み込み、クライアントをセットアップします。
+        """
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEYが設定されていません。 .envファイルを確認してください。")
+        
+        # genai.Client を使用してクライアントを初期化
+        self.client = genai.Client(api_key=api_key)
+
+    def generate_content(self, 
+                         model_name: str, 
+                         history: List[types.Content],
+                         system_prompt: Optional[str] = None) -> str:
+        """
+        指定されたモデル、履歴、システムプロンプトに基づいてコンテンツを生成します。
 
         Args:
-            model_name: 使用するGeminiモデルの名前。
-        """
-        configure_genai() # 初期化時に設定を確認・実行
-        self.model = genai.GenerativeModel(model_name)
-
-    def generate_content(self, history: list, system_prompt: str | None = None) -> str:
-        """
-        指定された履歴とシステムプロンプトに基づいてコンテンツを生成します。
-
-        Args:
-            history: 会話履歴のリスト (google.generativeai.types.Content 型のリスト)。
+            model_name: 使用するGeminiモデルの名前 (例: "gemini-1.5-flash")。
+            history: 会話履歴のリスト (google.generativeai.types.Content のリスト)。
             system_prompt: システムプロンプト (オプション)。
 
         Returns:
@@ -39,41 +41,49 @@ class GeminiClient:
         Raises:
             Exception: API呼び出し中にエラーが発生した場合。
         """
-        generation_config = genai.types.GenerationConfig(
+        processed_model_name = model_name
+
+        system_instruction_part = None
+        if system_prompt:
+            # サンプルに従い Part.from_text を使用 -> エラーのため元に戻す
+            system_instruction_part = types.Part(text=system_prompt)
+ 
+        # GenerationConfig を設定
+        generation_config = types.GenerateContentConfig(
             # response_mime_type="text/plain" # 必要に応じて設定
+            # サンプルに従い、system_instruction はリストで渡す
+            system_instruction=[system_instruction_part] if system_instruction_part else None
         )
 
-        system_instruction = None
-        if system_prompt:
-            system_instruction = genai.types.Part.from_text(system_prompt)
-
         try:
-            # システムプロンプトと履歴を結合
-            # contents = []
-            # if system_instruction:
-            #     # システムプロンプトは通常、最初のユーザーメッセージの前に追加しますが、
-            #     # Gemini API の system_instruction パラメータを使う方が推奨されます。
-            #     # ここでは history に user/model のやり取りのみが含まれる想定。
-            #     pass
-            # contents.extend(history)
-
-            response = self.model.generate_content(
+            # client.models.generate_content を使用
+            response = self.client.models.generate_content(
+                model=processed_model_name,
                 contents=history, 
-                generation_config=generation_config,
-                system_instruction=system_instruction # system_instructionパラメータを使用
+                config=generation_config,
+                # system_instruction は config に含める
             )
             return response.text
         except Exception as e:
             print(f"Gemini API呼び出し中にエラーが発生しました: {e}")
-            # ここでエラーを再raiseするか、デフォルトの応答を返すか、または特定の処理を行う
-            raise # or return "エラーが発生しました。"
+            raise
 
-    def generate_content_stream(self, history: list, system_prompt: str | None = None):
+    def _prepare_model_name(self, model_name: str) -> str:
+        """モデル名に 'models/' プレフィックスがなければ付与します。"""
+        if not model_name.startswith("models/"):
+            return f"models/{model_name}"
+        return model_name
+
+    def generate_content_stream(self, 
+                              model_name: str,
+                              history: List[types.Content],
+                              system_prompt: Optional[str] = None) -> Generator[str, None, None]:
         """
-        指定された履歴とシステムプロンプトに基づいてコンテンツをストリーミング生成します。
+        指定されたモデル、履歴、システムプロンプトに基づいてコンテンツをストリーミング生成します。
 
         Args:
-            history: 会話履歴のリスト (google.generativeai.types.Content 型のリスト)。
+            model_name: 使用するGeminiモデルの名前 (例: "gemini-1.5-flash")。
+            history: 会話履歴のリスト (google.generativeai.types.Content のリスト)。
             system_prompt: システムプロンプト (オプション)。
 
         Yields:
@@ -82,61 +92,83 @@ class GeminiClient:
         Raises:
             Exception: API呼び出し中にエラーが発生した場合。
         """
-        generation_config = genai.types.GenerationConfig(
+        processed_model_name = self._prepare_model_name(model_name)
+
+        system_instruction_part = None
+        if system_prompt:
+             # サンプルに従い Part.from_text を使用 -> エラーのため元に戻す
+            system_instruction_part = types.Part(text=system_prompt)
+ 
+        # GenerationConfig を設定
+        generation_config = types.GenerateContentConfig(
             # response_mime_type="text/plain" # 必要に応じて設定
+            # サンプルに従い、system_instruction はリストで渡す
+            system_instruction=[system_instruction_part] if system_instruction_part else None
         )
 
-        system_instruction = None
-        if system_prompt:
-            system_instruction = genai.types.Part.from_text(system_prompt)
-
         try:
-            stream = self.model.generate_content(
+            # client.models.generate_content_stream を使用
+            stream = self.client.models.generate_content_stream(
+                model=processed_model_name,
                 contents=history, 
-                generation_config=generation_config,
-                system_instruction=system_instruction,
-                stream=True
+                config=generation_config,
+                 # system_instruction は config に含める
             )
             for chunk in stream:
-                yield chunk.text
+                if hasattr(chunk, 'text'):
+                    yield chunk.text
         except Exception as e:
             print(f"Gemini APIストリーミング呼び出し中にエラーが発生しました: {e}")
-            raise # or yield "エラーが発生しました。"
+            raise
 
-# 使用例 (テスト用)
+# 使用例 (テスト用) - サンプルに合わせて修正
 if __name__ == '__main__':
     try:
-        client = GeminiClient(model_name="gemini-1.5-flash") # または "gemini-pro"
+        # Client の初期化方法を変更
+        client_instance = GeminiClient() 
         
-        # --- 通常の生成 ---
+        # --- 通常の生成 --- 
         print("--- 通常生成テスト ---")
+        # history を types.Content と types.Part(text=...) で作成
         history_example = [
-            {'role':'user', 'parts': ['Pythonでリストを逆順にする方法は？']},
-            # {'role':'model', 'parts': ['list.reverse()を使うか、スライス[::-1]を使います。']}
+            types.Content(role='user', parts=[types.Part(text='Pythonでリストを逆順にする方法は？')]),
         ]
         system_prompt_example = "あなたは親切なPythonアシスタントです。"
+        model_to_test = "gemini-1.5-flash" # テストするモデル名
         
-        response_text = client.generate_content(history=history_example, system_prompt=system_prompt_example)
+        # メソッド呼び出しを変更
+        response_text = client_instance.generate_content(
+            model_name=model_to_test,
+            history=history_example, 
+            system_prompt=system_prompt_example
+        )
         print("応答:", response_text)
         print("-"*20)
 
-        # --- ストリーミング生成 ---
+        # --- ストリーミング生成 --- 
         print("--- ストリーミング生成テスト ---")
         history_stream_example = [
-            {'role':'user', 'parts': ['Streamlitについて教えてください。']}
+             types.Content(role='user', parts=[types.Part(text='Streamlitについて教えてください。')])
         ]
         system_prompt_stream = "あなたはWebフレームワークのエキスパートです。"
         
         print("ストリーミング応答:")
         full_response = ""
-        for chunk_text in client.generate_content_stream(history=history_stream_example, system_prompt=system_prompt_stream):
+        # メソッド呼び出しを変更
+        stream_generator = client_instance.generate_content_stream(
+            model_name=model_to_test,
+            history=history_stream_example, 
+            system_prompt=system_prompt_stream
+        )
+        for chunk_text in stream_generator:
             print(chunk_text, end="", flush=True)
             full_response += chunk_text
         print("\nストリーミング完了。")
-        # print("完全な応答:", full_response)
         print("-"*20)
 
     except ValueError as ve:
         print(f"設定エラー: {ve}")
     except Exception as e:
         print(f"予期せぬエラーが発生しました: {e}") 
+        import traceback
+        print(traceback.format_exc())
