@@ -23,6 +23,7 @@ Gemini検索対応チャットアプリケーション「Gemini Search Chat」�
 - API通信: Google API Client
 - マークダウンレンダリング: Streamlitネイティブのマークダウンサポート
 - エクスポート: Pandas（CSV出力用）
+‐ 生成AI：google.genai (google.generativeaiは廃止されました)
 
 # 実装プロセス
 1. 要件を理解し、必要に応じて質問します
