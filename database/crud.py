@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from models.models import Message, Thread, Project # モデルをインポート
 import logging
+import datetime
 
 def search_messages(db: Session, query: str) -> list[Message]:
     """
@@ -94,6 +95,92 @@ def delete_thread(db: Session, thread_id: int) -> bool:
             return False
     else:
         logging.warning(f"削除対象のスレッド ID {thread_id} が見つかりません。")
+        return False
+
+def update_thread_name(db: Session, thread_id: int, new_name: str) -> bool:
+    """
+    指定された ID のスレッドの名前を更新します。
+
+    Args:
+        db: SQLAlchemy セッションオブジェクト。
+        thread_id: 更新するスレッドの ID。
+        new_name: 新しいスレッド名。
+
+    Returns:
+        更新が成功した場合は True、スレッドが見つからない場合や
+        名前が空の場合は False。
+    """
+    if not new_name or not new_name.strip():
+        logging.warning(f"スレッド ID {thread_id} の新しい名前が空です。")
+        return False
+
+    thread_to_update = db.query(Thread).filter(Thread.id == thread_id).first()
+    if thread_to_update:
+        try:
+            thread_to_update.name = new_name
+            thread_to_update.updated_at = datetime.datetime.utcnow() # 更新日時も更新
+            db.commit()
+            logging.info(f"スレッド ID {thread_id} の名前を '{new_name}' に更新しました。")
+            return True
+        except Exception as e:
+            db.rollback()
+            logging.error(f"スレッド ID {thread_id} の名前更新中にエラーが発生しました: {e}", exc_info=True)
+            return False
+    else:
+        logging.warning(f"更新対象のスレッド ID {thread_id} が見つかりません。")
+        return False
+
+def delete_project(db: Session, project_id: int) -> bool:
+    """
+    指定された ID のプロジェクトを削除します。
+    関連するスレッドとメッセージも削除されます。
+
+    Args:
+        db: SQLAlchemy セッションオブジェクト。
+        project_id: 削除するプロジェクトの ID。
+
+    Returns:
+        削除が成功した場合は True、プロジェクトが見つからない場合は False。
+    """
+    project_to_delete = db.query(Project).filter(Project.id == project_id).first()
+    if project_to_delete:
+        try:
+            # 関連するスレッド ID を取得
+            thread_ids = [thread.id for thread in project_to_delete.threads]
+            logging.info(f"プロジェクト ID {project_id} ('{project_to_delete.name}') に関連する {len(thread_ids)} 件のスレッドを削除します")
+
+            # 各スレッドに対して、まずメッセージを削除 (delete_thread 関数を利用できるか？)
+            # delete_thread はコミットを含むので、ここでは直接メッセージを削除する方が良いかも
+            if thread_ids:
+                message_count = db.query(Message).filter(Message.thread_id.in_(thread_ids)).count()
+                logging.info(f"{message_count} 件の関連メッセージを削除します")
+                db.query(Message).filter(Message.thread_id.in_(thread_ids)).delete(synchronize_session=False)
+                db.commit() # メッセージ削除をコミット (FTS トリガーのため)
+                logging.info("関連メッセージを削除しました")
+            
+            # 次に関連スレッドを削除 (カスケードで削除されるはずだが、明示的に行う)
+            # ここで project_to_delete.threads を使って削除すると、メッセージ削除後に
+            # session が expire している可能性があるので、再度クエリする方が安全
+            threads_to_delete = db.query(Thread).filter(Thread.project_id == project_id).all()
+            if threads_to_delete:
+                 logging.info(f"{len(threads_to_delete)} 件のスレッドを削除します")
+                 for thread in threads_to_delete:
+                     db.delete(thread)
+                 db.commit() # スレッド削除をコミット
+                 logging.info("関連スレッドを削除しました")
+            
+            # 最後にプロジェクト自体を削除
+            logging.info(f"プロジェクト ID {project_id} ('{project_to_delete.name}') を削除します")
+            db.delete(project_to_delete)
+            db.commit()
+            logging.info(f"プロジェクト ID {project_id} を削除しました。")
+            return True
+        except Exception as e:
+            db.rollback()
+            logging.error(f"プロジェクト ID {project_id} の削除中にエラーが発生しました: {e}", exc_info=True)
+            return False
+    else:
+        logging.warning(f"削除対象のプロジェクト ID {project_id} が見つかりません。")
         return False
 
 # 他の CRUD 操作関数もここに追加していく想定

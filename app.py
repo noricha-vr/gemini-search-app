@@ -6,7 +6,7 @@ import datetime
 from google.genai import types
 import logging # logging をインポート
 from utils.markdown_export import export_message_to_markdown # <-- インポートを追加
-from database.crud import search_messages, delete_thread # <-- delete_thread をインポート
+from database.crud import search_messages, delete_thread, update_thread_name, delete_project # <-- delete_project をインポート
 from sqlalchemy import func
 
 # logging の基本設定
@@ -93,6 +93,35 @@ try:
                 # メッセージを修正
                 st.sidebar.warning("プロジェクト名を入力してください。")
 
+    # --- プロジェクト削除ボタン --- (プロジェクトが選択されている場合)
+    if st.session_state.current_project_id:
+        st.sidebar.divider()
+        st.sidebar.subheader("プロジェクト操作")
+        current_project_name = next((p.name for p in projects if p.id == st.session_state.current_project_id), "不明なプロジェクト")
+        if st.sidebar.button(f"🗑️ '{current_project_name}' を削除", key="delete_project_button"):
+            st.session_state.confirm_delete_project = True # 確認状態をセット
+            st.rerun() # 確認メッセージを表示するために再実行
+
+        # 確認メッセージの表示と最終削除処理
+        if st.session_state.get("confirm_delete_project", False):
+            st.sidebar.warning(f"プロジェクト '{current_project_name}' を削除すると、関連する全てのスレッドとメッセージも削除されます。本当に削除しますか？")
+            col1, col2 = st.sidebar.columns(2)
+            if col1.button("はい、削除します", key="confirm_delete_yes"):
+                delete_success = delete_project(db, st.session_state.current_project_id)
+                if delete_success:
+                    st.sidebar.success(f"プロジェクト '{current_project_name}' を削除しました。")
+                    st.session_state.current_project_id = None
+                    st.session_state.current_thread_id = None
+                    st.session_state.confirm_delete_project = False # 確認状態をリセット
+                    st.rerun() # UI 更新
+                else:
+                    st.sidebar.error("プロジェクトの削除に失敗しました。")
+                    st.session_state.confirm_delete_project = False # 確認状態をリセット
+                    st.rerun()
+            if col2.button("キャンセル", key="confirm_delete_no"):
+                st.session_state.confirm_delete_project = False # 確認状態をリセット
+                st.rerun()
+
     # --- スレッド管理 --- (プロジェクトが選択されている場合のみ表示)
     if st.session_state.current_project_id:
         st.sidebar.header("スレッド")
@@ -111,41 +140,46 @@ try:
             st.sidebar.success("新しいスレッドを開始しました！")
             st.rerun()
 
-        # スレッド一覧と選択・削除
+        # スレッド一覧と選択・削除・編集
         selected_thread_id = st.session_state.current_thread_id
         for thread in threads:
-            col1, col2 = st.sidebar.columns([0.8, 0.2]) # レイアウト調整用カラム
-            with col1:
-                # メッセージ数を取得 (N+1 問題に注意)
-                # message_count = db.query(func.count(Message.id)).filter(Message.thread_id == thread.id).scalar()
-                # より効率的な方法: relationship の lazy loading を使うか、事前に count を取得
-                # ここではシンプルな表示のため N+1 を許容する (件数が少なければ問題になりにくい)
-                # ただし、厳密には session が異なる可能性があるので注意
-                # message_count = len(thread.messages) # これだと session が違うとエラーの可能性
-                # 安全のため都度クエリ (非効率)
-                message_count_query = db.query(func.count(Message.id)).filter(Message.thread_id == thread.id)
-                message_count = message_count_query.scalar() if message_count_query else 0
-                thread_label = f"{thread.name} ({message_count} msgs)"
+            # Expander を使って編集UIを隠す
+            with st.sidebar.expander(f"{thread.name} ({db.query(func.count(Message.id)).filter(Message.thread_id == thread.id).scalar() or 0} msgs)", expanded=False):
+                new_name = st.text_input("新しいスレッド名", value=thread.name, key=f"edit_thread_name_{thread.id}")
+                if st.button("名前を保存", key=f"save_thread_name_{thread.id}"):
+                    if new_name.strip():
+                        update_success = update_thread_name(db, thread.id, new_name.strip())
+                        if update_success:
+                            st.success("名前を更新しました！")
+                            # Expander を閉じるか、rerun で再描画
+                            st.rerun()
+                        else:
+                            st.error("名前の更新に失敗しました。")
+                    else:
+                        st.warning("スレッド名は空にできません。")
 
-                # スレッド選択ボタン (st.radio の代わり)
-                if st.button(thread_label, key=f"select_thread_{thread.id}", use_container_width=True,
+            # Expander の外に選択・削除ボタンを配置 (レイアウト調整が必要かも)
+            col1, col2 = st.sidebar.columns([0.8, 0.2])
+            with col1:
+                # スレッド選択ボタン (プライマリ/セカンダリで見分ける)
+                if st.button(f"開く: {thread.name}", key=f"select_thread_button_{thread.id}", use_container_width=True,
                               type="primary" if thread.id == selected_thread_id else "secondary"):
                     st.session_state.current_thread_id = thread.id
                     st.session_state.show_search_results = False # 検索表示解除
-                    st.rerun() 
+                    st.rerun()
             with col2:
                 # スレッド削除ボタン
-                if st.button("🗑️", key=f"delete_thread_{thread.id}", help="このスレッドを削除します"):
-                    # TODO: 確認ダイアログを追加するとより安全
+                if st.button("🗑️", key=f"delete_thread_button_{thread.id}", help="このスレッドを削除します"):
                     delete_success = delete_thread(db, thread.id)
                     if delete_success:
-                        st.sidebar.success(f"スレッド '{thread.name}' を削除しました。")
-                        # 現在選択中のスレッドが削除されたら選択解除
+                        st.success(f"スレッド '{thread.name}' を削除しました。")
                         if st.session_state.current_thread_id == thread.id:
                             st.session_state.current_thread_id = None
-                        st.rerun() # スレッド一覧を更新
+                        st.rerun()
                     else:
-                        st.sidebar.error(f"スレッド '{thread.name}' の削除に失敗しました。")
+                        st.error(f"スレッド '{thread.name}' の削除に失敗しました。")
+
+            st.sidebar.divider() # スレッド間の区切り線
 
     # --- ★検索機能 --- 
     st.sidebar.header("検索")
