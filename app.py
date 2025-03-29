@@ -6,7 +6,8 @@ import datetime
 from google.genai import types
 import logging # logging をインポート
 from utils.markdown_export import export_message_to_markdown # <-- インポートを追加
-from database.crud import search_messages # <-- search_messages をインポート
+from database.crud import search_messages, delete_thread # <-- delete_thread をインポート
+from sqlalchemy import func
 
 # logging の基本設定
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -110,20 +111,41 @@ try:
             st.sidebar.success("新しいスレッドを開始しました！")
             st.rerun()
 
-        # スレッド選択
-        selected_thread_name = st.sidebar.selectbox(
-            "スレッドを選択",
-            thread_names,
-            index=thread_names.index(next((t.name for t in threads if t.id == st.session_state.current_thread_id), None)) if st.session_state.current_thread_id and any(t.id == st.session_state.current_thread_id for t in threads) else 0,
-            # disabled=not threads # スレッドがなくても新規作成があるので disabled にしない
-        )
+        # スレッド一覧と選択・削除
+        selected_thread_id = st.session_state.current_thread_id
+        for thread in threads:
+            col1, col2 = st.sidebar.columns([0.8, 0.2]) # レイアウト調整用カラム
+            with col1:
+                # メッセージ数を取得 (N+1 問題に注意)
+                # message_count = db.query(func.count(Message.id)).filter(Message.thread_id == thread.id).scalar()
+                # より効率的な方法: relationship の lazy loading を使うか、事前に count を取得
+                # ここではシンプルな表示のため N+1 を許容する (件数が少なければ問題になりにくい)
+                # ただし、厳密には session が異なる可能性があるので注意
+                # message_count = len(thread.messages) # これだと session が違うとエラーの可能性
+                # 安全のため都度クエリ (非効率)
+                message_count_query = db.query(func.count(Message.id)).filter(Message.thread_id == thread.id)
+                message_count = message_count_query.scalar() if message_count_query else 0
+                thread_label = f"{thread.name} ({message_count} msgs)"
 
-        if selected_thread_name:
-            st.session_state.current_thread_id = thread_map[selected_thread_name]
-        elif threads: # スレッドが存在するのに選択されていない場合（初期状態など）
-             st.session_state.current_thread_id = threads[0].id # 最新のスレッドをデフォルトで選択
-        else:
-            st.session_state.current_thread_id = None
+                # スレッド選択ボタン (st.radio の代わり)
+                if st.button(thread_label, key=f"select_thread_{thread.id}", use_container_width=True,
+                              type="primary" if thread.id == selected_thread_id else "secondary"):
+                    st.session_state.current_thread_id = thread.id
+                    st.session_state.show_search_results = False # 検索表示解除
+                    st.rerun() 
+            with col2:
+                # スレッド削除ボタン
+                if st.button("🗑️", key=f"delete_thread_{thread.id}", help="このスレッドを削除します"):
+                    # TODO: 確認ダイアログを追加するとより安全
+                    delete_success = delete_thread(db, thread.id)
+                    if delete_success:
+                        st.sidebar.success(f"スレッド '{thread.name}' を削除しました。")
+                        # 現在選択中のスレッドが削除されたら選択解除
+                        if st.session_state.current_thread_id == thread.id:
+                            st.session_state.current_thread_id = None
+                        st.rerun() # スレッド一覧を更新
+                    else:
+                        st.sidebar.error(f"スレッド '{thread.name}' の削除に失敗しました。")
 
     # --- ★検索機能 --- 
     st.sidebar.header("検索")

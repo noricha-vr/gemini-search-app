@@ -56,5 +56,45 @@ def search_messages(db: Session, query: str) -> list[Message]:
         # エラーが発生した場合は空リストを返すか、例外を再発生させる
         return []
 
+def delete_thread(db: Session, thread_id: int) -> bool:
+    """
+    指定された ID のスレッドを削除します。
+    関連するメッセージもカスケード削除されます。
+
+    Args:
+        db: SQLAlchemy セッションオブジェクト。
+        thread_id: 削除するスレッドの ID。
+
+    Returns:
+        削除が成功した場合は True、スレッドが見つからない場合は False。
+    """
+    thread_to_delete = db.query(Thread).filter(Thread.id == thread_id).first()
+    if thread_to_delete:
+        try:
+            # 明示的に関連メッセージを先に削除（FTSのトリガー関連の問題を回避するため）
+            messages = db.query(Message).filter(Message.thread_id == thread_id).all()
+            logging.info(f"スレッド ID {thread_id} から {len(messages)} 件のメッセージを削除します")
+            
+            # 一つずつ削除する（メッセージが多い場合はバルク削除を検討）
+            for message in messages:
+                db.delete(message)
+            
+            # 一旦コミットしてメッセージ削除を確定
+            db.commit()
+            logging.info(f"スレッド ID {thread_id} のメッセージを削除しました")
+            
+            # 次にスレッド自体を削除
+            db.delete(thread_to_delete)
+            db.commit()
+            logging.info(f"スレッド ID {thread_id} を削除しました。")
+            return True
+        except Exception as e:
+            db.rollback()
+            logging.error(f"スレッド ID {thread_id} の削除中にエラーが発生しました: {e}", exc_info=True)
+            return False
+    else:
+        logging.warning(f"削除対象のスレッド ID {thread_id} が見つかりません。")
+        return False
+
 # 他の CRUD 操作関数もここに追加していく想定
 # (例: get_project, create_thread, get_messages_by_thread など) 
