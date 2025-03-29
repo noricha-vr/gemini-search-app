@@ -5,6 +5,7 @@ from api.gemini_client import GeminiClient
 import datetime
 from google.genai import types
 import logging # logging をインポート
+from utils.markdown_export import export_message_to_markdown # <-- インポートを追加
 
 # logging の基本設定
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -167,7 +168,17 @@ if st.session_state.current_project_id:
                         current_thread.updated_at = datetime.datetime.utcnow()
                         db.add(current_thread)
                         
-                        db.commit() 
+                        db.commit()
+
+                        # --- ★マークダウンエクスポート (ユーザー) ---
+                        export_message_to_markdown(
+                            project_name=current_project.name,
+                            thread_id=current_thread.id,
+                            thread_name=current_thread.name,
+                            role="user",
+                            content=prompt
+                        )
+                        # --- ★マークダウンエクスポートここまで ---
 
                         # 2. Gemini API 呼び出し準備
                         #    - 履歴を API 用の形式に変換 (システムプロンプトは別途渡す)
@@ -230,6 +241,16 @@ if st.session_state.current_project_id:
                             db.add(current_thread)
 
                             db.commit()
+
+                            # --- ★マークダウンエクスポート (アシスタント) ---
+                            export_message_to_markdown(
+                                project_name=current_project.name,
+                                thread_id=current_thread.id,
+                                thread_name=current_thread.name,
+                                role="assistant",
+                                content=full_response
+                            )
+                            # --- ★マークダウンエクスポートここまで ---
 
                         except Exception as e:
                             st.error(f"Gemini API の呼び出し中にエラーが発生しました: {e}")
