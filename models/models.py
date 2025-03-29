@@ -10,7 +10,6 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True, index=True)
     system_prompt = Column(Text, nullable=False)
-    model_name = Column(String, nullable=False, default="gemini-1.5-flash")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 

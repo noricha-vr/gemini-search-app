@@ -4,6 +4,11 @@ from models.models import Project, Thread, Message
 from api.gemini_client import GeminiClient
 import datetime
 from google.genai import types
+import logging # logging をインポート
+
+# logging の基本設定
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
 # --- データベース初期化 ---
 init_db()
 
@@ -15,7 +20,6 @@ if "current_thread_id" not in st.session_state:
 
 # --- 定数 --- # モデルリストを定義
 AVAILABLE_MODELS = [
-    # 要件に記載のモデル名に合わせて調整 (現在は google-generativeai がサポートする名称を使用)
     "gemini-2.0-flash", 
     "gemini-2.0-flash-thinking-exp-01-21",
     "gemini-2.0-pro-exp-02-05", 
@@ -55,18 +59,19 @@ try:
     with st.sidebar.expander("新しいプロジェクトを作成"): 
         new_project_name = st.text_input("プロジェクト名")
         new_system_prompt = st.text_area("システムプロンプト", value="あなたは役立つアシスタントです。")
-        # モデル選択を追加 (要件 2.1)
-        selected_model = st.selectbox("使用するモデルを選択", AVAILABLE_MODELS, index=0)
+        # モデル選択を削除 (要件変更)
+        # selected_model = st.selectbox("使用するモデルを選択", AVAILABLE_MODELS, index=0)
         
         if st.button("作成"):
-            if new_project_name and selected_model:
+            # モデル選択のチェックを削除
+            if new_project_name:
                 # 同じ名前のプロジェクトがないか確認
                 existing_project = db.query(Project).filter(Project.name == new_project_name).first()
                 if not existing_project:
                     new_project = Project(
                         name=new_project_name, 
                         system_prompt=new_system_prompt,
-                        model_name=selected_model # モデル選択の値を入れる
+                        # model_name=selected_model # モデル選択を削除
                     )
                     db.add(new_project)
                     db.commit()
@@ -78,7 +83,8 @@ try:
                 else:
                     st.sidebar.error("同じ名前のプロジェクトが既に存在します。")
             else:
-                st.sidebar.warning("プロジェクト名とモデルを選択してください。")
+                # メッセージを修正
+                st.sidebar.warning("プロジェクト名を入力してください。")
 
     # --- スレッド管理 --- (プロジェクトが選択されている場合のみ表示)
     if st.session_state.current_project_id:
@@ -130,7 +136,18 @@ if st.session_state.current_project_id:
                 current_thread = db.query(Thread).filter(Thread.id == st.session_state.current_thread_id).first()
                 if current_thread:
                     st.write(f"スレッド: {current_thread.name}")
+
+                    # --- モデル選択 (チャットエリア上部) ---
+                    # セッションステートに選択モデルを保存
+                    if 'selected_model' not in st.session_state:
+                        st.session_state.selected_model = AVAILABLE_MODELS[0] # デフォルト
                     
+                    st.session_state.selected_model = st.selectbox(
+                        "使用するモデル:", 
+                        AVAILABLE_MODELS,
+                        index=AVAILABLE_MODELS.index(st.session_state.selected_model) if st.session_state.selected_model in AVAILABLE_MODELS else 0
+                    )
+
                     # --- チャット履歴の表示 ---
                     messages = db.query(Message).filter(Message.thread_id == current_thread.id).order_by(Message.created_at).all()
                     for msg in messages:
@@ -158,33 +175,44 @@ if st.session_state.current_project_id:
                         for m in messages:
                             try:
                                 # 役割(role)に応じて Content オブジェクトを作成
+                                # DBの 'assistant' を API の 'model' に変換
+                                api_role = 'model' if m.role == 'assistant' else m.role
                                 # parts はリストである必要があるため、Part オブジェクトを生成
                                 # Part.from_text でエラーが出たため Part(text=...) を使用
-                                history_for_api.append(types.Content(role=m.role, parts=[types.Part(text=m.content)]))
+                                history_for_api.append(types.Content(role=api_role, parts=[types.Part(text=m.content)]))
                             except ValueError as e:
                                 st.error(f"履歴メッセージのフォーマットエラー (ID: {m.id}, Role: {m.role}): {e}")
                                 continue 
                         
-                        # 最新のユーザーメッセージを Content オブジェクトとして追加
+                        # 最新のユーザーメッセージを Content オブジェクトとして追加 (role は 'user' で確定)
                         try:
                             # Part.from_text でエラーが出たため Part(text=...) を使用
                             history_for_api.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
                         except ValueError as e:
                             st.error(f"ユーザー入力のフォーマットエラー: {e}")
                             db.rollback() 
-                            st.stop() 
+                            st.stop()
 
                         # 3. Gemini API 呼び出しと応答表示 (ストリーミング)
                         try:
                             # Client の初期化を変更 (引数なし)
                             client = GeminiClient()
+
+                            # --- デバッグログ追加 ---
+                            logging.debug(f"Project ID: {current_project.id}, Thread ID: {current_thread.id}")
+                            logging.debug(f"Selected Model: {st.session_state.selected_model}")
+                            logging.debug(f"System Prompt: {current_project.system_prompt}")
+                            logging.debug(f"History for API (first 5 items): {history_for_api[:5]}") # 全部は多いので先頭5件
+                            logging.debug(f"Total history items for API: {len(history_for_api)}")
+                            # --- デバッグログここまで ---
+
                             with st.chat_message("assistant"):
                                 # ストリーミング応答を表示するプレースホルダー
-                                response_placeholder = st.empty() 
+                                response_placeholder = st.empty()
                                 full_response = ""
-                                # メソッド呼び出しに model_name を追加
+                                # メソッド呼び出しに session_state からモデル名を取得して渡す
                                 stream = client.generate_content_stream(
-                                    model_name=current_project.model_name,
+                                    model_name=st.session_state.selected_model, # 選択されたモデルを使用
                                     history=history_for_api, 
                                     system_prompt=current_project.system_prompt
                                 )
