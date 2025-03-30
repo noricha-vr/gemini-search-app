@@ -79,20 +79,17 @@ def set_initial_state():
 
     # --- セッション状態の初期化 --- (読み込んだ値で初期化)
     if "current_project_id" not in st.session_state:
-        st.session_state.current_project_id = initial_project_id
+        st.session_state.current_project_id = None
     if "current_thread_id" not in st.session_state:
-        st.session_state.current_thread_id = initial_thread_id
-    # 他のセッション状態も初期化
+        st.session_state.current_thread_id = None
     if "search_results" not in st.session_state:
-        st.session_state.search_results = None
+        st.session_state.search_results = None # 検索結果を格納
     if "show_search_results" not in st.session_state:
-        st.session_state.show_search_results = False
+        st.session_state.show_search_results = False # 検索結果表示モードのフラグ
     if "editing_project" not in st.session_state:
         st.session_state.editing_project = False
     if "project_to_edit_id" not in st.session_state:
         st.session_state.project_to_edit_id = None
-    if "visible_thread_count" not in st.session_state:
-        st.session_state.visible_thread_count = 5
     if "creating_project" not in st.session_state:
         st.session_state.creating_project = False
 
@@ -200,6 +197,7 @@ try:
         st.sidebar.header("スレッド")
         current_project_id = st.session_state.current_project_id
         threads = db.query(Thread).filter(Thread.project_id == current_project_id).order_by(Thread.updated_at.desc()).all()
+        # logging.info(f"[Sidebar Render] Fetched {len(threads)} threads for project {current_project_id}. Displaying up to {st.session_state.visible_thread_count}") # <-- ログ削除
 
         # 新規スレッド作成ボタン
         if st.sidebar.button("新しいスレッドを開始"):
@@ -208,21 +206,21 @@ try:
             db.commit()
             db.refresh(new_thread)
             st.session_state.current_thread_id = new_thread.id
-            st.session_state.visible_thread_count = 5 # 表示件数をリセット
+            # st.session_state.visible_thread_count = 5 # <-- 削除
             st.sidebar.success("新しいスレッドを開始しました！")
             st.rerun()
+        
+        st.sidebar.divider() # スレッドリストの前に区切り線
 
-        # スレッド一覧表示 (表示件数を制限)
+        # スレッド一覧表示 (全件表示)
         selected_thread_id = st.session_state.current_thread_id
-        threads_to_display = threads[:st.session_state.visible_thread_count]
+        # threads_to_display = threads[:st.session_state.visible_thread_count] # <-- 削除
 
-        if not threads_to_display and not threads: # スレッドが全くない場合
+        if not threads: # スレッドが全くない場合
              st.sidebar.caption("まだスレッドがありません。")
-        # elif not threads_to_display and threads: # 全て表示済の場合など -> ボタン表示ロジックでカバー
-        #     pass 
         else:
             # スレッド名と削除ボタンを1行に表示
-            for thread in threads_to_display:
+            for thread in threads: # 全ての threads をループ
                 col1, col2 = st.sidebar.columns([0.8, 0.2])
                 with col1:
                     # メッセージ数を取得 (効率は改善の余地あり)
@@ -234,32 +232,30 @@ try:
                     if st.button(thread_label, key=f"select_thread_{thread.id}", use_container_width=True,
                                   type="primary" if thread.id == selected_thread_id else "secondary"):
                         st.session_state.current_thread_id = thread.id
-                        st.session_state.show_search_results = False # 検索表示解除
-                        st.session_state.editing_project = False # プロジェクト編集解除
+                        st.session_state.show_search_results = False 
+                        st.session_state.editing_project = False 
                         st.rerun()
                 with col2:
                     # スレッド削除ボタン
                     if st.button("🗑️", key=f"delete_thread_{thread.id}", help="このスレッドを削除します"):
-                        delete_success = delete_thread(db, thread.id)
+                        thread_id_to_delete = thread.id 
+                        thread_name_to_delete = thread.name 
+                        logging.info(f"[Delete Button Clicked] Attempting to delete thread ID: {thread_id_to_delete}, Name: {thread_name_to_delete}") 
+                        delete_success = delete_thread(db, thread_id_to_delete)
+                        logging.info(f"[Delete Action] Deletion result for thread {thread_id_to_delete}: {delete_success}") 
                         if delete_success:
-                            st.success(f"スレッド '{thread.name}' を削除しました。")
-                            if st.session_state.current_thread_id == thread.id:
+                            st.sidebar.success(f"スレッド '{thread_name_to_delete}' を削除しました。") 
+                            current_selection = st.session_state.current_thread_id
+                            if current_selection == thread_id_to_delete:
                                 st.session_state.current_thread_id = None
-                            # 表示件数はリセットしない
+                                logging.info(f"[Delete Action] Current thread selection {current_selection} was deleted, setting to None.") 
+                            else:
+                                logging.info(f"[Delete Action] Deleted thread {thread_id_to_delete}, current selection {current_selection} remains.") 
                             st.rerun()
                         else:
-                            st.error(f"スレッド '{thread.name}' の削除に失敗しました。")
-                # st.sidebar.divider() # 各スレッドごとの区切り線は削除
-
-        # 「もっと表示する」ボタン
-        if len(threads) > st.session_state.visible_thread_count:
-            st.sidebar.divider()
-            if st.sidebar.button("もっと表示する"):
-                st.session_state.visible_thread_count += 10
-                st.rerun()
-        elif threads: # スレッドがあり、かつ全件表示されている場合
-            st.sidebar.divider()
-            st.sidebar.caption(f"全 {len(threads)} 件のスレッドを表示中")
+                            st.sidebar.error(f"スレッド '{thread_name_to_delete}' の削除に失敗しました。") 
+                
+        st.sidebar.divider() # スレッドリストの後にも区切り線
 
     # --- ★検索機能 --- 
     st.sidebar.header("検索")
