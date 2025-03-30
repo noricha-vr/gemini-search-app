@@ -12,7 +12,8 @@ from database.crud import ( # インポートを整形
     update_thread_name, 
     delete_project, 
     update_project,
-    delete_all_threads_in_project # <-- 新しい関数をインポート
+    delete_all_threads_in_project, # <-- 新しい関数をインポート
+    delete_empty_threads_in_project # <-- 空チャット削除関数をインポート
 )
 from sqlalchemy import func
 from utils.csv_export import get_all_data_as_dataframe, generate_csv_data # <-- CSVエクスポート関数をインポート
@@ -216,6 +217,17 @@ try:
             db.add(new_thread)
             db.commit()
             db.refresh(new_thread)
+            
+            # --- ★★★ 空チャットの自動削除 (今作成したチャットは除く) ★★★ ---
+            deleted_count = delete_empty_threads_in_project(
+                db, 
+                current_project_id, 
+                exclude_thread_id=new_thread.id # ★ 除外IDを指定
+            )
+            if deleted_count > 0:
+                logging.info(f"{deleted_count} 件の空チャットを自動削除しました。")
+            # --- ★★★ 自動削除ここまで ★★★ ---
+
             st.session_state.current_thread_id = new_thread.id
             # st.session_state.visible_thread_count = 5 # <-- 削除
             st.sidebar.success("新規チャットを開始しました！")

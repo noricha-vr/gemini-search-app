@@ -281,5 +281,48 @@ def delete_all_threads_in_project(db: Session, project_id: int) -> bool:
         logging.error(f"プロジェクト ID {project_id} の全スレッド削除中にエラーが発生しました: {e}", exc_info=True)
         return False
 
+def delete_empty_threads_in_project(db: Session, project_id: int, exclude_thread_id: int | None = None) -> int:
+    """
+    指定されたプロジェクト内で、メッセージが存在しないチャット（スレッド）を削除します。
+    特定のチャットIDを除外することも可能です。
+
+    Args:
+        db: SQLAlchemy セッションオブジェクト。
+        project_id: 対象のプロジェクト ID。
+        exclude_thread_id: 削除対象から除外するチャットの ID (オプション)。
+
+    Returns:
+        削除されたチャットの数。エラー時は 0。
+    """
+    try:
+        # メッセージが存在しないスレッドの ID を取得
+        # LEFT JOIN を使用し、Message が NULL のものを探す
+        query = db.query(Thread.id).outerjoin(Message).filter(
+            Thread.project_id == project_id,
+            Message.id == None
+        )
+        # 除外IDが指定されていれば、条件に追加
+        if exclude_thread_id is not None:
+            query = query.filter(Thread.id != exclude_thread_id)
+            
+        empty_thread_ids = [item[0] for item in query.all()]
+
+        if not empty_thread_ids:
+            logging.debug(f"プロジェクト ID {project_id} に削除対象の空チャットは見つかりませんでした (除外ID: {exclude_thread_id})。")
+            return 0
+
+        logging.info(f"プロジェクト ID {project_id} の {len(empty_thread_ids)} 件の空のチャットを削除します (除外ID: {exclude_thread_id}): {empty_thread_ids}")
+        
+        # 取得した ID のスレッドを削除
+        deleted_count = db.query(Thread).filter(Thread.id.in_(empty_thread_ids)).delete(synchronize_session=False)
+        db.commit()
+        logging.info(f"{deleted_count} 件の空のチャットを削除しました。")
+        return deleted_count if deleted_count is not None else 0
+
+    except Exception as e:
+        db.rollback()
+        logging.error(f"プロジェクト ID {project_id} の空チャット削除中にエラーが発生しました: {e}", exc_info=True)
+        return 0
+
 # 他の CRUD 操作関数もここに追加していく想定
 # (例: get_project, create_thread, get_messages_by_thread など) 
