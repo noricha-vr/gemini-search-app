@@ -1,7 +1,9 @@
 import os
 import datetime
+import logging
 
-MARKDOWN_BASE_DIR = "markdown_files"
+# 環境変数からマークダウン保存ディレクトリを取得、なければデフォルト値
+MARKDOWN_BASE_DIR = os.getenv("MARKDOWN_SAVE_DIR", "markdown_files")
 
 def sanitize_filename(name: str) -> str:
     """ファイル名として安全でない文字を置換します。"""
@@ -45,5 +47,4 @@ def export_message_to_markdown(project_name: str, thread_id: int, thread_name: s
 
     except Exception as e:
         # エラー発生時はログに出力（Streamlit画面には出さない方が良いかも）
-        import logging
         logging.error(f"マークダウンファイルへのエクスポート中にエラーが発生しました: {e}", exc_info=True) 

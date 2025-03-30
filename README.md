@@ -57,7 +57,10 @@ Python と Streamlit を使用して Gemini API で検索ができる個人用 W
     cp .env.example .env
     # nano .env またはお好みのエディタで API キーを設定
     # 例: GEMINI_API_KEY="YOUR_API_KEY_HERE"
+    # 例: MARKDOWN_SAVE_DIR="path/to/your/markdown_directory" # (オプション) マークダウンの保存先。デフォルトは "markdown_files"
     ```
+    - `GEMINI_API_KEY`: Google AI Studio で取得した API キーを設定します。
+    - `MARKDOWN_SAVE_DIR` (オプション): スレッドごとのマークダウンファイルが保存されるディレクトリを指定します。指定しない場合は、プロジェクトルートに `markdown_files` ディレクトリが作成されます。
 
 5.  **アプリケーションの実行:**
     ```bash
