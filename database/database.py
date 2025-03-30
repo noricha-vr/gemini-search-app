@@ -7,6 +7,7 @@ from sqlalchemy.engine import Engine
 # from models.models import Base  # <-- 循環インポートの原因なので削除
 from sqlalchemy import text
 import logging # logging をインポート
+from sqlalchemy import inspect
 
 # ロガーの設定 (既にあれば不要)
 logging.basicConfig(level=logging.DEBUG)
@@ -32,6 +33,7 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
 def init_db():
     """データベースを初期化し、通常のテーブルと FTS 関連を作成します。"""
     import models.models # <-- モデル定義モジュールをここでインポート
+    
     log.debug("init_db: Starting database initialization.")
     log.debug(f"init_db: Tables known by Base.metadata before create_all: {Base.metadata.tables.keys()}")
 
@@ -39,10 +41,19 @@ def init_db():
         # 同じ接続/トランザクション内で全ての DDL を実行
         log.debug("init_db: Starting transaction.")
         try:
-            # 1. SQLAlchemy のモデルに基づいて通常のテーブルを作成
-            log.debug("init_db: Calling Base.metadata.create_all...")
-            Base.metadata.create_all(bind=connection) # ここで connection を渡す
-            log.debug("init_db: Base.metadata.create_all finished.")
+            # テーブルの存在確認
+            inspector = inspect(engine)
+            existing_tables = inspector.get_table_names()
+            log.debug(f"init_db: Existing tables: {existing_tables}")
+            
+            # 'projects'テーブルが既に存在する場合はスキップ
+            if 'projects' in existing_tables:
+                log.info("init_db: Projects table already exists, skipping table creation.")
+            else:
+                # 1. SQLAlchemy のモデルに基づいて通常のテーブルを作成
+                log.debug("init_db: Calling Base.metadata.create_all...")
+                Base.metadata.create_all(bind=connection) # ここで connection を渡す
+                log.debug("init_db: Base.metadata.create_all finished.")
 
             # 2. FTS 仮想テーブルとトリガーを直接作成
             log.debug("init_db: Creating FTS table...")
