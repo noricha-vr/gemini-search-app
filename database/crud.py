@@ -4,6 +4,9 @@ from models.models import Message, Thread, Project # モデルをインポート
 import logging
 import datetime
 
+# モジュールレベルのロガーを取得
+log = logging.getLogger(__name__)
+
 def search_messages(db: Session, query: str) -> list[Message]:
     """
     指定されたクエリ文字列を使用して、メッセージ履歴を全文検索します。
@@ -19,38 +22,23 @@ def search_messages(db: Session, query: str) -> list[Message]:
     if not query.strip():
         return []
 
-    # FTS5 のクエリを作成 (スペースを AND に置換するような形を想定)
-    # 単純にスペース区切りでも FTS5 は AND 検索として扱うことが多いが、明示的に作ることも可能
-    # ここでは単純なスペース区切り文字列をそのまま使用
-    # 例: "キーワード1 キーワード2" -> FTS5 は両方を含むものを検索
-    # 特殊文字のエスケープが必要な場合があるかもしれない
-    fts_query = query.strip()
-
+    # クエリを空白で分割して検索用語を抽出
+    terms = query.strip().split()
+    if not terms:
+        return []
+    
     try:
-        # message_fts テーブルを検索して message の id (rowid) を取得
-        # ORDER BY rank で関連性の高い順にソート
-        stmt = text("""
-            SELECT rowid 
-            FROM message_fts 
-            WHERE message_fts MATCH :query 
-            ORDER BY rank
-        """)
-        result = db.execute(stmt, {"query": fts_query})
-        message_ids = [row[0] for row in result.fetchall()]
-
-        if not message_ids:
-            return []
-
-        # 取得した ID に基づいて Message オブジェクトを取得
-        # JOIN を使って関連する Thread と Project も効率的に取得できるが、
-        # まずは Message のみを取得し、必要に応じて UI 側で追加情報を取得する
-        messages = db.query(Message).filter(Message.id.in_(message_ids)).all()
-
-        # FTS の結果順序 (rank) を保持するために、取得したメッセージを並び替える
-        message_map = {msg.id: msg for msg in messages}
-        ordered_messages = [message_map[id] for id in message_ids if id in message_map]
-
-        return ordered_messages
+        # FTS5を使わず、SQLのLIKE演算子を使用して検索
+        # 各検索用語を含むメッセージをAND条件で検索
+        query_obj = db.query(Message)
+        
+        # すべての用語に対してフィルターを適用
+        for term in terms:
+            query_obj = query_obj.filter(Message.content.ilike(f'%{term}%'))
+        
+        # 結果を取得
+        messages = query_obj.all()
+        return messages
 
     except Exception as e:
         logging.error(f"メッセージ検索中にエラーが発生しました (Query: {query}): {e}", exc_info=True)
