@@ -469,18 +469,21 @@ elif st.session_state.show_search_results:
         st.write(f"{len(results)} 件のメッセージが見つかりました。")
         for result in results:
             msg = result["message"]
-            with st.expander(f"**{result['project_name']}** / **{result['thread_name']}** ({msg.created_at.strftime('%Y-%m-%d %H:%M')}) - {msg.role}"):
-                st.markdown(f"> {msg.content[:100]}..." if len(msg.content) > 100 else f"> {msg.content}") # プレビュー
-                # st.markdown(msg.content) # 全文表示
-                # 検索結果から該当チャットにジャンプするボタン
-                if st.button(f"このチャットを開く ({result['thread_name']})", key=f"goto_thread_{msg.id}"):
-                    st.session_state.current_project_id = result['project_id']
-                    st.session_state.current_thread_id = result['thread_id']
-                    st.session_state.show_search_results = False 
-                    st.session_state.editing_project = False # 他のモード解除
-                    st.session_state.creating_project = False
-                    save_last_project_id(result['project_id']) # ★状態保存
-                    st.rerun()
+            # 検索結果カードのヘッダー
+            st.markdown(f"### **{result['project_name']}** / **{result['thread_name']}** ({msg.created_at.strftime('%Y-%m-%d %H:%M')}) - {msg.role}")
+            # メッセージ内容を表示
+            st.markdown(msg.content) # 全文表示
+            # 検索結果から該当チャットにジャンプするボタン
+            if st.button(f"このチャットを開く ({result['thread_name']})", key=f"goto_thread_{msg.id}"):
+                st.session_state.current_project_id = result['project_id']
+                st.session_state.current_thread_id = result['thread_id']
+                st.session_state.show_search_results = False 
+                st.session_state.editing_project = False # 他のモード解除
+                st.session_state.creating_project = False
+                save_last_project_id(result['project_id']) # ★状態保存
+                st.rerun()
+            # セパレータで検索結果を区切る
+            st.divider()
     else:
         st.info("検索条件に一致するメッセージは見つかりませんでした。")
 
