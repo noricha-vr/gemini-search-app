@@ -282,10 +282,13 @@ try:
             for thread in threads: # 全ての threads をループ
                 col1, col2 = st.sidebar.columns([0.8, 0.2])
                 with col1:
-                    # メッセージ数を取得 (効率は改善の余地あり)
-                    message_count_query = db.query(func.count(Message.id)).filter(Message.thread_id == thread.id)
-                    message_count = message_count_query.scalar() or 0
-                    thread_label = f"{thread.name} ({message_count} msgs)"
+                    # メッセージ数を取得する処理を削除
+                    # message_count_query = db.query(func.count(Message.id)).filter(Message.thread_id == thread.id)
+                    # message_count = message_count_query.scalar() or 0
+                    # thread_label = f"{thread.name} ({message_count} msgs)"
+                    
+                    # スレッド名のみをラベルとして使用
+                    thread_label = thread.name
                     
                     # チャット選択ボタン
                     if st.button(thread_label, key=f"select_thread_{thread.id}", use_container_width=True,
