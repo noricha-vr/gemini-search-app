@@ -9,30 +9,96 @@ from utils.markdown_export import export_message_to_markdown # <-- インポー�
 from database.crud import search_messages, delete_thread, update_thread_name, delete_project, update_project # <-- delete_project をインポート
 from sqlalchemy import func
 from utils.csv_export import get_all_data_as_dataframe, generate_csv_data # <-- CSVエクスポート関数をインポート
+import json # json モジュールをインポート
+import os # os モジュールをインポート
 
 # logging の基本設定
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# --- 状態保存/読み込み設定 ---
+STATE_FILE = ".last_state.json"
+
+# --- 状態保存ヘルパー関数 ---
+def save_last_project_id(project_id: int | None):
+    try:
+        data = {"last_project_id": project_id}
+        with open(STATE_FILE, 'w') as f:
+            json.dump(data, f)
+        logging.debug(f"Saved last project ID: {project_id} to {STATE_FILE}")
+    except Exception as e:
+        logging.error(f"Failed to save last state to {STATE_FILE}: {e}")
+
+# --- 状態読み込みヘルパー関数 ---
+def load_last_project_id() -> int | None:
+    if not os.path.exists(STATE_FILE):
+        return None
+    try:
+        with open(STATE_FILE, 'r') as f:
+            data = json.load(f)
+        last_id = data.get("last_project_id")
+        logging.debug(f"Loaded last project ID: {last_id} from {STATE_FILE}")
+        return last_id
+    except Exception as e:
+        logging.error(f"Failed to load last state from {STATE_FILE}: {e}")
+        return None
+
 # --- データベース初期化 ---
 init_db()
 
-# --- セッション状態の初期化 ---
-if "current_project_id" not in st.session_state:
-    st.session_state.current_project_id = None
-if "current_thread_id" not in st.session_state:
-    st.session_state.current_thread_id = None
-if "search_results" not in st.session_state:
-    st.session_state.search_results = None # 検索結果を格納
-if "show_search_results" not in st.session_state:
-    st.session_state.show_search_results = False # 検索結果表示モードのフラグ
-if "editing_project" not in st.session_state:
-    st.session_state.editing_project = False
-if "project_to_edit_id" not in st.session_state:
-    st.session_state.project_to_edit_id = None
-if "visible_thread_count" not in st.session_state:
-    st.session_state.visible_thread_count = 5
-if "creating_project" not in st.session_state:
-    st.session_state.creating_project = False
+# --- ★★★ 初期状態設定 ★★★ ---
+def set_initial_state():
+    """アプリ起動時に最後の状態を復元し、新規スレッドを開始"""
+    last_project_id = load_last_project_id()
+    initial_project_id = None
+    initial_thread_id = None
+
+    if last_project_id is not None:
+        db = SessionLocal()
+        try:
+            # 最後に使ったプロジェクトが存在するか確認
+            last_project = db.query(Project).filter(Project.id == last_project_id).first()
+            if last_project:
+                initial_project_id = last_project_id
+                # 新しいスレッドを作成
+                threads_count = db.query(func.count(Thread.id)).filter(Thread.project_id == initial_project_id).scalar() or 0
+                new_thread = Thread(project_id=initial_project_id, name=f"新しいスレッド {threads_count + 1}")
+                db.add(new_thread)
+                db.commit()
+                db.refresh(new_thread)
+                initial_thread_id = new_thread.id
+                logging.info(f"Restored project {initial_project_id}, created and selected new thread {initial_thread_id}")
+            else:
+                logging.warning(f"Last project ID {last_project_id} not found in DB. Clearing state.")
+                save_last_project_id(None) # 無効なIDはクリア
+        except Exception as e:
+            logging.error(f"Error setting initial state: {e}")
+            if db.is_active:
+                 db.rollback()
+        finally:
+            db.close()
+
+    # --- セッション状態の初期化 --- (読み込んだ値で初期化)
+    if "current_project_id" not in st.session_state:
+        st.session_state.current_project_id = initial_project_id
+    if "current_thread_id" not in st.session_state:
+        st.session_state.current_thread_id = initial_thread_id
+    # 他のセッション状態も初期化
+    if "search_results" not in st.session_state:
+        st.session_state.search_results = None
+    if "show_search_results" not in st.session_state:
+        st.session_state.show_search_results = False
+    if "editing_project" not in st.session_state:
+        st.session_state.editing_project = False
+    if "project_to_edit_id" not in st.session_state:
+        st.session_state.project_to_edit_id = None
+    if "visible_thread_count" not in st.session_state:
+        st.session_state.visible_thread_count = 5
+    if "creating_project" not in st.session_state:
+        st.session_state.creating_project = False
+
+# アプリのメインロジック開始前に初期状態を設定
+set_initial_state()
+# ★★★ 初期状態設定ここまで ★★★
 
 # --- 定数 --- # モデルリストを定義
 AVAILABLE_MODELS = [
@@ -62,62 +128,71 @@ try:
     )
 
     if selected_project_name:
-        # プロジェクトが切り替わったらスレッド選択もリセット
-        if st.session_state.current_project_id != project_map[selected_project_name]:
+        new_project_id = project_map[selected_project_name]
+        # プロジェクトが切り替わったらスレッド選択もリセット & 状態保存
+        if st.session_state.current_project_id != new_project_id:
              st.session_state.current_thread_id = None 
-        st.session_state.current_project_id = project_map[selected_project_name]
+             st.session_state.current_project_id = new_project_id
+             save_last_project_id(new_project_id) # ★状態保存
+             st.rerun() # 明示的にリランして初期化を促す？
+        # 既に選択されているものが再度選ばれた場合は何もしない
 
     else:
-        st.session_state.current_project_id = None
-        st.session_state.current_thread_id = None
+        # プロジェクトが選択されなかった場合 (例: プロジェクトが0件)
+        if st.session_state.current_project_id is not None:
+             st.session_state.current_project_id = None
+             st.session_state.current_thread_id = None
+             save_last_project_id(None) # ★状態保存 (クリア)
 
     # --- 新規プロジェクト作成ボタン --- 
     if st.sidebar.button("新しいプロジェクトを作成", key="create_project_button_sidebar"):
         st.session_state.creating_project = True
-        st.session_state.editing_project = False # 他のモードは解除
+        st.session_state.editing_project = False 
         st.session_state.show_search_results = False
-        st.session_state.current_project_id = None # プロジェクト選択も解除
-        st.session_state.current_thread_id = None
+        # current_project_id などは main エリアの作成完了時に設定＆保存
         st.rerun()
 
-    # --- プロジェクト削除ボタン --- (プロジェクトが選択されている場合)
+    # --- プロジェクト操作ボタン (編集/削除) ---
     if st.session_state.current_project_id:
-        current_project_name = next((p.name for p in projects if p.id == st.session_state.current_project_id), "不明なプロジェクト")
+        current_project_id_for_ops = st.session_state.current_project_id # 削除処理用にIDを保持
+        current_project_name = next((p.name for p in projects if p.id == current_project_id_for_ops), "不明なプロジェクト")
         
-        col_edit, col_delete = st.sidebar.columns(2) # 編集と削除ボタン用にカラムを作成
+        col_edit, col_delete = st.sidebar.columns(2) 
         
         # 編集ボタン
         with col_edit:
             if st.button("⚙️ 編集", key="edit_project_button", use_container_width=True):
                 st.session_state.editing_project = True
-                st.session_state.project_to_edit_id = st.session_state.current_project_id
-                st.session_state.show_search_results = False # 検索結果表示は解除
-                st.rerun() # メインエリアを編集フォーム表示に切り替え
+                st.session_state.project_to_edit_id = current_project_id_for_ops
+                st.session_state.creating_project = False # 他のモード解除
+                st.session_state.show_search_results = False 
+                st.rerun() 
         
         # 削除ボタン
         with col_delete:
             if st.button(f"🗑️ 削除", key="delete_project_button", use_container_width=True):
-                st.session_state.confirm_delete_project = True # 確認状態をセット
-                st.rerun() # 確認メッセージを表示するために再実行
+                st.session_state.confirm_delete_project = True 
+                st.rerun() 
 
         # 削除確認メッセージの表示と最終削除処理
         if st.session_state.get("confirm_delete_project", False):
             st.sidebar.warning(f"プロジェクト '{current_project_name}' を削除すると、関連する全てのスレッドとメッセージも削除されます。本当に削除しますか？")
-            col1, col2 = st.sidebar.columns(2)
-            if col1.button("はい、削除します", key="confirm_delete_yes"):
-                delete_success = delete_project(db, st.session_state.current_project_id)
+            col1_confirm, col2_confirm = st.sidebar.columns(2)
+            if col1_confirm.button("はい、削除します", key="confirm_delete_yes"):
+                delete_success = delete_project(db, current_project_id_for_ops)
                 if delete_success:
                     st.sidebar.success(f"プロジェクト '{current_project_name}' を削除しました。")
                     st.session_state.current_project_id = None
                     st.session_state.current_thread_id = None
-                    st.session_state.confirm_delete_project = False # 確認状態をリセット
-                    st.rerun() # UI 更新
+                    st.session_state.confirm_delete_project = False 
+                    save_last_project_id(None) # ★状態保存 (クリア)
+                    st.rerun() 
                 else:
                     st.sidebar.error("プロジェクトの削除に失敗しました。")
-                    st.session_state.confirm_delete_project = False # 確認状態をリセット
+                    st.session_state.confirm_delete_project = False 
                     st.rerun()
-            if col2.button("キャンセル", key="confirm_delete_no"):
-                st.session_state.confirm_delete_project = False # 確認状態をリセット
+            if col2_confirm.button("キャンセル", key="confirm_delete_no"):
+                st.session_state.confirm_delete_project = False 
                 st.rerun()
 
     # --- スレッド管理 --- (プロジェクトが選択されている場合のみ表示)
@@ -268,7 +343,6 @@ if st.session_state.creating_project:
             submitted = st.form_submit_button("作成")
             if submitted:
                 if new_project_name and new_project_name.strip():
-                    # 同じ名前のプロジェクトがないか確認
                     existing_project = db.query(Project).filter(Project.name == new_project_name.strip()).first()
                     if not existing_project:
                         new_project = Project(
@@ -279,9 +353,12 @@ if st.session_state.creating_project:
                         db.commit()
                         db.refresh(new_project) # IDを取得
                         st.success(f"プロジェクト '{new_project.name}' を作成しました！")
-                        st.session_state.creating_project = False # 作成モード解除
+                        st.session_state.creating_project = False 
                         st.session_state.current_project_id = new_project.id # 作成したプロジェクトを選択
-                        st.session_state.current_thread_id = None # スレッドは未選択
+                        st.session_state.current_thread_id = None # スレッドは未選択のまま or 新規作成?
+                        save_last_project_id(new_project.id) # ★状態保存
+                        # ここで新規スレッドも作成して選択状態にするか？ 要件に合わせて調整
+                        # 現状はプロジェクト選択のみ。次にリロードされると新規スレッドが作られる想定。
                         st.rerun()
                     else:
                         st.error("同じ名前のプロジェクトが既に存在します。")
@@ -311,12 +388,12 @@ elif st.session_state.editing_project and st.session_state.project_to_edit_id:
                     update_success = update_project(db, project_to_edit.id, edited_name, edited_system_prompt)
                     if update_success:
                         st.success("プロジェクトを更新しました！")
-                        st.session_state.editing_project = False # 編集モード解除
+                        st.session_state.editing_project = False
                         st.session_state.project_to_edit_id = None
-                        # 必要であれば現在のプロジェクト選択を維持または更新
+                        # 最後に選択していたIDを保存 (名前変更されてもIDは同じ)
+                        save_last_project_id(project_to_edit.id) # ★状態保存
                         st.rerun()
                     else:
-                        # update_project 内で重複エラーなどをログ出力しているので、ここでは汎用メッセージ
                         st.error("プロジェクトの更新に失敗しました。名前が重複している可能性があります。")
             
             if st.button("キャンセル"):
@@ -345,8 +422,10 @@ elif st.session_state.show_search_results:
                 if st.button(f"このスレッドを開く ({result['thread_name']})", key=f"goto_thread_{msg.id}"):
                     st.session_state.current_project_id = result['project_id']
                     st.session_state.current_thread_id = result['thread_id']
-                    st.session_state.show_search_results = False # チャット表示モードに戻す
-                    st.session_state.search_results = None
+                    st.session_state.show_search_results = False 
+                    st.session_state.editing_project = False # 他のモード解除
+                    st.session_state.creating_project = False
+                    save_last_project_id(result['project_id']) # ★状態保存
                     st.rerun()
     else:
         st.info("検索条件に一致するメッセージは見つかりませんでした。")
