@@ -541,17 +541,26 @@ else:
                         st.write(f"チャット: {current_thread.name}")
 
                         # --- モデル選択 (チャットエリア上部) ---
-                        # セッションステートに選択モデルを保存
-                        if 'selected_model' not in st.session_state:
-                            st.session_state.selected_model = AVAILABLE_MODELS[0] # デフォルト
+                        # グローバルなアプリ設定として選択モデルを保存（チャット間で共有）
+                        if 'global_selected_model' not in st.session_state:
+                            st.session_state.global_selected_model = AVAILABLE_MODELS[0] # デフォルト
                         
-                        st.session_state.selected_model = st.selectbox(
+                        # 現在の選択値を一時的な変数に保存
+                        current_selection = st.selectbox(
                             "使用するモデル:", 
                             AVAILABLE_MODELS,
-                            index=AVAILABLE_MODELS.index(st.session_state.selected_model) if st.session_state.selected_model in AVAILABLE_MODELS else 0,
-                            key="model_selector_main",  # <-- 一意なキーを追加
+                            index=AVAILABLE_MODELS.index(st.session_state.global_selected_model) if st.session_state.global_selected_model in AVAILABLE_MODELS else 0,
+                            key="model_selector_main",
                             label_visibility="collapsed"  # ラベルを非表示に設定
                         )
+                        
+                        # 選択が変更された場合のみ、グローバル設定を更新
+                        if current_selection != st.session_state.global_selected_model:
+                            st.session_state.global_selected_model = current_selection
+                            st.success(f"モデルを {current_selection} に変更しました。", icon="✅")
+                        
+                        # APIリクエスト用のモデル名変数
+                        selected_model_for_api = st.session_state.global_selected_model
 
                         # --- チャット履歴の表示 ---
                         messages = db.query(Message).filter(Message.thread_id == current_thread.id).order_by(Message.created_at).all()
@@ -618,7 +627,7 @@ else:
 
                                 # --- デバッグログ追加 ---
                                 logging.debug(f"Project ID: {current_project.id}, Thread ID: {current_thread.id}")
-                                logging.debug(f"Selected Model: {st.session_state.selected_model}")
+                                logging.debug(f"Selected Model: {selected_model_for_api}")
                                 logging.debug(f"System Prompt: {current_project.system_prompt}")
                                 logging.debug(f"History for API (first 5 items): {history_for_api[:5]}") # 全部は多いので先頭5件
                                 logging.debug(f"Total history items for API: {len(history_for_api)}")
@@ -630,7 +639,7 @@ else:
                                     full_response = ""
                                     # メソッド呼び出しに session_state からモデル名を取得して渡す
                                     stream = client.generate_content_stream(
-                                        model_name=st.session_state.selected_model, # 選択されたモデルを使用
+                                        model_name=selected_model_for_api, # 選択されたモデルを使用
                                         history=history_for_api, 
                                         system_prompt=current_project.system_prompt
                                     )
