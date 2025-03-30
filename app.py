@@ -561,6 +561,20 @@ else:
                                 )
                                 # --- ★マークダウンエクスポートここまで ---
 
+                                # --- ★★★ スレッド名の自動設定 (最初のやり取り後) ★★★ ---
+                                if not messages: # API呼び出し前のメッセージリストが空だったら
+                                    new_thread_name = prompt[:20] # ユーザー入力の先頭20文字
+                                    if new_thread_name:
+                                        logging.info(f"最初のやり取りを検出。スレッド ID {current_thread.id} の名前を自動設定: '{new_thread_name}'")
+                                        # update_thread_name を直接呼び出すのではなく、セッションを再利用
+                                        update_success = update_thread_name(db, current_thread.id, new_thread_name)
+                                        if update_success:
+                                            # 即時反映のため rerun
+                                            st.rerun()
+                                        else:
+                                            logging.warning("スレッド名の自動設定に失敗しました。")
+                                # --- ★★★ 自動設定ここまで ★★★ ---
+
                             except Exception as e:
                                 st.error(f"Gemini API の呼び出し中にエラーが発生しました: {e}")
                         # --- ★★★ チャット入力復元ここまで ★★★ ---
