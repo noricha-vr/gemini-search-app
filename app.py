@@ -27,29 +27,65 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 # --- 状態保存/読み込み設定 ---
 STATE_FILE = ".last_state.json"
 
+# --- 定数 --- # モデルリストを定義
+AVAILABLE_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-thinking-exp-01-21",
+    "gemini-2.0-pro-exp-02-05",
+    "gemini-2.5-pro-exp-03-25"
+]
+
 # --- 状態保存ヘルパー関数 ---
-def save_last_project_id(project_id: int | None):
+def save_app_state(project_id: int | None, selected_model: str | None = None):
     try:
-        data = {"last_project_id": project_id}
+        # 既存データがあれば読み込んで更新
+        data = {}
+        if os.path.exists(STATE_FILE):
+            try:
+                with open(STATE_FILE, 'r') as f:
+                    data = json.load(f)
+            except:
+                # ファイル読み込みエラーの場合は新規作成
+                pass
+        
+        # 値を更新
+        data["last_project_id"] = project_id
+        
+        # モデル情報が指定されていればそれも保存
+        if selected_model:
+            data["last_selected_model"] = selected_model
+        
+        # 保存
         with open(STATE_FILE, 'w') as f:
             json.dump(data, f)
-        logging.debug(f"Saved last project ID: {project_id} to {STATE_FILE}")
+        logging.debug(f"Saved app state: project_id={project_id}, model={selected_model if selected_model else 'unchanged'}")
     except Exception as e:
-        logging.error(f"Failed to save last state to {STATE_FILE}: {e}")
+        logging.error(f"Failed to save app state to {STATE_FILE}: {e}")
+
+# 既存の関数を新しいものに置き換え (互換性維持)
+def save_last_project_id(project_id: int | None):
+    save_app_state(project_id)
 
 # --- 状態読み込みヘルパー関数 ---
-def load_last_project_id() -> int | None:
+def load_app_state():
+    """アプリの状態を読み込む。プロジェクトIDとモデル設定を返す"""
     if not os.path.exists(STATE_FILE):
-        return None
+        return None, None
     try:
         with open(STATE_FILE, 'r') as f:
             data = json.load(f)
         last_id = data.get("last_project_id")
-        logging.debug(f"Loaded last project ID: {last_id} from {STATE_FILE}")
-        return last_id
+        last_model = data.get("last_selected_model")
+        logging.debug(f"Loaded app state: project_id={last_id}, model={last_model}")
+        return last_id, last_model
     except Exception as e:
-        logging.error(f"Failed to load last state from {STATE_FILE}: {e}")
-        return None
+        logging.error(f"Failed to load app state from {STATE_FILE}: {e}")
+        return None, None
+
+# 互換性のための関数
+def load_last_project_id() -> int | None:
+    project_id, _ = load_app_state()
+    return project_id
 
 # --- データベース初期化 ---
 init_db()
@@ -63,7 +99,7 @@ def set_initial_state():
         return
     
     logging.info("Performing initial state setup...")
-    last_project_id = load_last_project_id()
+    last_project_id, last_model = load_app_state()
     initial_project_id = None
     initial_thread_id = None
 
@@ -84,7 +120,7 @@ def set_initial_state():
                 logging.info(f"Restored project {initial_project_id}, created and selected new thread {initial_thread_id}")
             else:
                 logging.warning(f"Last project ID {last_project_id} not found in DB. Clearing state.")
-                save_last_project_id(None) # 無効なIDはクリア
+                save_app_state(None) # 無効なIDはクリア
         except Exception as e:
             logging.error(f"Error setting initial state: {e}")
             if db.is_active:
@@ -103,6 +139,14 @@ def set_initial_state():
     st.session_state.visible_thread_count = 5 # チャット表示件数もここで初期化
     st.session_state.creating_project = False
     
+    # モデル設定の初期化
+    if last_model and last_model in AVAILABLE_MODELS:
+        st.session_state.global_selected_model = last_model
+        logging.info(f"Restored last used model: {last_model}")
+    else:
+        st.session_state.global_selected_model = AVAILABLE_MODELS[0]
+        logging.info(f"Using default model: {AVAILABLE_MODELS[0]}")
+    
     # ★★★ 初期化完了フラグを立てる ★★★
     st.session_state.initial_state_complete = True
     logging.info("Initial state setup complete.")
@@ -111,13 +155,7 @@ def set_initial_state():
 set_initial_state()
 # ★★★ 初期状態設定ここまで ★★★
 
-# --- 定数 --- # モデルリストを定義
-AVAILABLE_MODELS = [
-    "gemini-2.0-flash", 
-    "gemini-2.0-flash-thinking-exp-01-21",
-    "gemini-2.0-pro-exp-02-05", 
-    "gemini-2.5-pro-exp-03-25"
-]
+
 
 # --- サイドバー --- 
 st.sidebar.title("Gemini Search Chat")
@@ -161,7 +199,7 @@ try:
         if st.session_state.current_project_id != new_project_id:
              st.session_state.current_thread_id = None 
              st.session_state.current_project_id = new_project_id
-             save_last_project_id(new_project_id) # ★状態保存
+             save_app_state(new_project_id) # 状態保存（モデルはそのまま）
              st.rerun() # 明示的にリランして初期化を促す？
         # 既に選択されているものが再度選ばれた場合は何もしない
 
@@ -170,7 +208,7 @@ try:
         if st.session_state.current_project_id is not None:
              st.session_state.current_project_id = None
              st.session_state.current_thread_id = None
-             save_last_project_id(None) # ★状態保存 (クリア)
+             save_app_state(None) # 状態保存 (クリア)
 
     # --- 新規プロジェクト作成ボタン --- 
     if st.sidebar.button("新しいプロジェクトを作成", key="create_project_button_sidebar"):
@@ -213,7 +251,7 @@ try:
                     st.session_state.current_project_id = None
                     st.session_state.current_thread_id = None
                     st.session_state.confirm_delete_project = False 
-                    save_last_project_id(None) # ★状態保存 (クリア)
+                    save_app_state(None) # 状態保存 (クリア)
                     st.rerun() 
                 else:
                     st.sidebar.error("プロジェクトの削除に失敗しました。")
@@ -430,7 +468,7 @@ if st.session_state.creating_project:
                         st.session_state.creating_project = False 
                         st.session_state.current_project_id = new_project.id # 作成したプロジェクトを選択
                         st.session_state.current_thread_id = None # チャットは未選択のまま or 新規作成?
-                        save_last_project_id(new_project.id) # ★状態保存
+                        save_app_state(new_project.id) # 状態保存
                         # ここで新規チャットも作成して選択状態にするか？ 要件に合わせて調整
                         # 現状はプロジェクト選択のみ。次にリロードされると新規チャットが作られる想定。
                         st.rerun()
@@ -465,7 +503,7 @@ elif st.session_state.editing_project and st.session_state.project_to_edit_id:
                         st.session_state.editing_project = False
                         st.session_state.project_to_edit_id = None
                         # 最後に選択していたIDを保存 (名前変更されてもIDは同じ)
-                        save_last_project_id(project_to_edit.id) # ★状態保存
+                        save_app_state(st.session_state.current_project_id) # 状態保存
                         st.rerun()
                     else:
                         st.error("プロジェクトの更新に失敗しました。名前が重複している可能性があります。")
@@ -517,7 +555,7 @@ elif st.session_state.show_search_results:
                 st.session_state.show_search_results = False 
                 st.session_state.editing_project = False # 他のモード解除
                 st.session_state.creating_project = False
-                save_last_project_id(result['project_id']) # ★状態保存
+                save_app_state(result['project_id']) # 状態保存
                 st.rerun()
             # セパレータで検索結果を区切る
             st.divider()
@@ -556,8 +594,13 @@ else:
                         
                         # 選択が変更された場合のみ、グローバル設定を更新
                         if current_selection != st.session_state.global_selected_model:
+                            old_model = st.session_state.global_selected_model
                             st.session_state.global_selected_model = current_selection
-                            st.success(f"モデルを {current_selection} に変更しました。", icon="✅")
+                            
+                            # モデル変更を永続化（ブラウザリロード後も保持）
+                            save_app_state(st.session_state.current_project_id, current_selection)
+                            
+                            st.success(f"モデルを {old_model} から {current_selection} に変更しました。", icon="✅")
                         
                         # APIリクエスト用のモデル名変数
                         selected_model_for_api = st.session_state.global_selected_model
