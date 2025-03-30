@@ -226,5 +226,60 @@ def update_project(db: Session, project_id: int, new_name: str, new_system_promp
         logging.warning(f"更新対象のプロジェクト ID {project_id} が見つかりません。")
         return False
 
+def delete_all_threads_in_project(db: Session, project_id: int) -> bool:
+    """
+    指定されたプロジェクト ID に属する全てのスレッドと関連メッセージを削除します。
+
+    Args:
+        db: SQLAlchemy セッションオブジェクト。
+        project_id: 対象のプロジェクト ID。
+
+    Returns:
+        削除が成功した場合は True、エラーが発生した場合は False。
+    """
+    # プロジェクトが存在するか一応確認 (任意)
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        logging.warning(f"全スレッド削除対象のプロジェクト ID {project_id} が見つかりません。")
+        return False
+
+    try:
+        # 削除対象のスレッド ID を取得
+        threads_to_delete = db.query(Thread).filter(Thread.project_id == project_id).all()
+        thread_ids = [thread.id for thread in threads_to_delete]
+
+        if not thread_ids:
+            logging.info(f"プロジェクト ID {project_id} に削除対象のスレッドはありません。")
+            return True # 何も削除しないが、処理としては成功
+        
+        logging.info(f"プロジェクト ID {project_id} から {len(thread_ids)} 件のスレッドとそのメッセージを削除します。")
+
+        # 1. 関連するメッセージを全て削除 (FTS トリガーのため先にコミット)
+        message_count = db.query(Message).filter(Message.thread_id.in_(thread_ids)).count()
+        if message_count > 0:
+            logging.info(f"{message_count} 件の関連メッセージを削除します。")
+            db.query(Message).filter(Message.thread_id.in_(thread_ids)).delete(synchronize_session=False)
+            db.commit()
+            logging.info("関連メッセージを削除しました。")
+        else:
+            logging.info("削除対象のメッセージはありませんでした。")
+
+        # 2. スレッドを全て削除
+        logging.info(f"{len(threads_to_delete)} 件のスレッドを削除します。")
+        # delete() を使うより、オブジェクトを渡して削除する方が確実な場合がある
+        for thread in threads_to_delete:
+            db.delete(thread)
+        # db.query(Thread).filter(Thread.project_id == project_id).delete(synchronize_session=False)
+        db.commit()
+        logging.info("関連スレッドを削除しました。")
+
+        logging.info(f"プロジェクト ID {project_id} の全スレッド削除が完了しました。")
+        return True
+
+    except Exception as e:
+        db.rollback()
+        logging.error(f"プロジェクト ID {project_id} の全スレッド削除中にエラーが発生しました: {e}", exc_info=True)
+        return False
+
 # 他の CRUD 操作関数もここに追加していく想定
 # (例: get_project, create_thread, get_messages_by_thread など) 

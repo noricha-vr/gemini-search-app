@@ -6,7 +6,14 @@ import datetime
 from google.genai import types
 import logging # logging をインポート
 from utils.markdown_export import export_message_to_markdown # <-- インポートを追加
-from database.crud import search_messages, delete_thread, update_thread_name, delete_project, update_project # <-- delete_project をインポート
+from database.crud import ( # インポートを整形
+    search_messages, 
+    delete_thread, 
+    update_thread_name, 
+    delete_project, 
+    update_project,
+    delete_all_threads_in_project # <-- 新しい関数をインポート
+)
 from sqlalchemy import func
 from utils.csv_export import get_all_data_as_dataframe, generate_csv_data # <-- CSVエクスポート関数をインポート
 import json # json モジュールをインポート
@@ -261,6 +268,36 @@ try:
                             st.sidebar.error(f"スレッド '{thread_name_to_delete}' の削除に失敗しました。") 
                 
         st.sidebar.divider() # スレッドリストの後にも区切り線
+
+        # --- ★ 全スレッド一括削除ボタン ★ --- 
+        if threads: # スレッドが存在する場合のみ表示
+            st.sidebar.divider() # 個別スレッドとの区切り
+            if st.sidebar.button("⚠️ このプロジェクトの全スレッドを削除", key="delete_all_threads_button"):
+                st.session_state.confirm_delete_all_threads = True # 確認状態をセット
+                st.rerun()
+
+            # 確認メッセージと最終削除処理
+            if st.session_state.get("confirm_delete_all_threads", False):
+                current_project = db.query(Project).filter(Project.id == current_project_id).first() # プロジェクト名表示用
+                st.sidebar.warning(f"プロジェクト '{current_project.name if current_project else ''}' の全てのスレッド ({len(threads)}件) を削除します。本当によろしいですか？")
+                col1_confirm_all, col2_confirm_all = st.sidebar.columns(2)
+                if col1_confirm_all.button("はい、全て削除します", key="confirm_delete_all_yes"):
+                    delete_success = delete_all_threads_in_project(db, current_project_id)
+                    if delete_success:
+                        st.sidebar.success("全ての関連スレッドを削除しました。")
+                        st.session_state.current_thread_id = None # スレッド選択解除
+                        st.session_state.confirm_delete_all_threads = False # 確認状態リセット
+                        st.rerun()
+                    else:
+                        st.sidebar.error("全スレッドの削除に失敗しました。")
+                        st.session_state.confirm_delete_all_threads = False # 確認状態リセット
+                        st.rerun()
+                if col2_confirm_all.button("キャンセル", key="confirm_delete_all_no"):
+                    st.session_state.confirm_delete_all_threads = False # 確認状態リセット
+                    st.rerun()
+        # --- ★ 一括削除ここまで ★ ---
+        else: # スレッドがない場合は区切り線だけ表示（任意）
+             st.sidebar.divider()
 
     # --- ★検索機能 --- 
     st.sidebar.header("検索")
