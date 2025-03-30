@@ -80,7 +80,7 @@
     ```bash
     streamlit run app.py
     ```
-    ブラウザで `http://localhost:8501` などにアクセスします。
+    ブラウザで [http://localhost:8501](http://localhost:8501) にアクセスします。
 
 ## 使い方
 
