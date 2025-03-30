@@ -19,6 +19,7 @@ from sqlalchemy import func
 from utils.csv_export import get_all_data_as_dataframe, generate_csv_data # <-- CSVエクスポート関数をインポート
 import json # json モジュールをインポート
 import os # os モジュールをインポート
+import re # re モジュールをインポート
 
 # logging の基本設定
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -467,12 +468,29 @@ elif st.session_state.show_search_results:
     results = st.session_state.search_results
     if results:
         st.write(f"{len(results)} 件のメッセージが見つかりました。")
+        
+        # 検索キーワードを取得（サイドバーの検索ボックスから）
+        search_terms = st.session_state.get("search_input", "").strip().split()
+        
         for result in results:
             msg = result["message"]
             # 検索結果カードのヘッダー
             st.markdown(f"### **{result['project_name']}** / **{result['thread_name']}** ({msg.created_at.strftime('%Y-%m-%d %H:%M')}) - {msg.role}")
-            # メッセージ内容を表示
-            st.markdown(msg.content) # 全文表示
+            
+            # メッセージ内容を表示（検索キーワードをハイライト）
+            content = msg.content
+            if search_terms:
+                # 検索キーワードごとにハイライト
+                for term in search_terms:
+                    if term.strip():  # 空の検索語を除外
+                        # 大文字小文字を区別せずにキーワードを強調表示
+                        pattern = re.compile(re.escape(term), re.IGNORECASE)
+                        # matched_text はキーワードが一致した元のテキスト（大文字/小文字を保持）
+                        content = pattern.sub(lambda m: f"<span style='background-color: #0000FF; font-weight: bold;'>{m.group(0)}</span>", content)
+            
+            # HTMLタグが解釈されるようにunsafe_allow_htmlをTrueに設定
+            st.markdown(content, unsafe_allow_html=True)
+            
             # 検索結果から該当チャットにジャンプするボタン
             if st.button(f"このチャットを開く ({result['thread_name']})", key=f"goto_thread_{msg.id}"):
                 st.session_state.current_project_id = result['project_id']
