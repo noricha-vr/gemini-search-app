@@ -29,6 +29,8 @@ if "editing_project" not in st.session_state:
     st.session_state.editing_project = False
 if "project_to_edit_id" not in st.session_state:
     st.session_state.project_to_edit_id = None
+if "visible_thread_count" not in st.session_state:
+    st.session_state.visible_thread_count = 5
 
 # --- 定数 --- # モデルリストを定義
 AVAILABLE_MODELS = [
@@ -143,59 +145,66 @@ try:
         st.sidebar.header("スレッド")
         current_project_id = st.session_state.current_project_id
         threads = db.query(Thread).filter(Thread.project_id == current_project_id).order_by(Thread.updated_at.desc()).all()
-        thread_names = [t.name for t in threads]
-        thread_map = {t.name: t.id for t in threads}
 
         # 新規スレッド作成ボタン
-        if st.sidebar.button("新しいスレッドを開始"): 
+        if st.sidebar.button("新しいスレッドを開始"):
             new_thread = Thread(project_id=current_project_id, name=f"新しいスレッド {len(threads) + 1}") # 仮の名前
             db.add(new_thread)
             db.commit()
             db.refresh(new_thread)
             st.session_state.current_thread_id = new_thread.id
+            st.session_state.visible_thread_count = 5 # 表示件数をリセット
             st.sidebar.success("新しいスレッドを開始しました！")
             st.rerun()
 
-        # スレッド一覧と選択・削除・編集
+        # スレッド一覧表示 (表示件数を制限)
         selected_thread_id = st.session_state.current_thread_id
-        for thread in threads:
-            # Expander を使って編集UIを隠す
-            with st.sidebar.expander(f"{thread.name} ({db.query(func.count(Message.id)).filter(Message.thread_id == thread.id).scalar() or 0} msgs)", expanded=False):
-                new_name = st.text_input("新しいスレッド名", value=thread.name, key=f"edit_thread_name_{thread.id}")
-                if st.button("名前を保存", key=f"save_thread_name_{thread.id}"):
-                    if new_name.strip():
-                        update_success = update_thread_name(db, thread.id, new_name.strip())
-                        if update_success:
-                            st.success("名前を更新しました！")
-                            # Expander を閉じるか、rerun で再描画
+        threads_to_display = threads[:st.session_state.visible_thread_count]
+
+        if not threads_to_display and not threads: # スレッドが全くない場合
+             st.sidebar.caption("まだスレッドがありません。")
+        # elif not threads_to_display and threads: # 全て表示済の場合など -> ボタン表示ロジックでカバー
+        #     pass 
+        else:
+            # スレッド名と削除ボタンを1行に表示
+            for thread in threads_to_display:
+                col1, col2 = st.sidebar.columns([0.8, 0.2])
+                with col1:
+                    # メッセージ数を取得 (効率は改善の余地あり)
+                    message_count_query = db.query(func.count(Message.id)).filter(Message.thread_id == thread.id)
+                    message_count = message_count_query.scalar() or 0
+                    thread_label = f"{thread.name} ({message_count} msgs)"
+                    
+                    # スレッド選択ボタン
+                    if st.button(thread_label, key=f"select_thread_{thread.id}", use_container_width=True,
+                                  type="primary" if thread.id == selected_thread_id else "secondary"):
+                        st.session_state.current_thread_id = thread.id
+                        st.session_state.show_search_results = False # 検索表示解除
+                        st.session_state.editing_project = False # プロジェクト編集解除
+                        st.rerun()
+                with col2:
+                    # スレッド削除ボタン
+                    if st.button("🗑️", key=f"delete_thread_{thread.id}", help="このスレッドを削除します"):
+                        delete_success = delete_thread(db, thread.id)
+                        if delete_success:
+                            st.success(f"スレッド '{thread.name}' を削除しました。")
+                            if st.session_state.current_thread_id == thread.id:
+                                st.session_state.current_thread_id = None
+                            # 表示件数はリセットしない
                             st.rerun()
                         else:
-                            st.error("名前の更新に失敗しました。")
-                    else:
-                        st.warning("スレッド名は空にできません。")
+                            st.error(f"スレッド '{thread.name}' の削除に失敗しました。")
+                # st.sidebar.divider() # 各スレッドごとの区切り線は削除
 
-            # Expander の外に選択・削除ボタンを配置 (レイアウト調整が必要かも)
-            col1, col2 = st.sidebar.columns([0.8, 0.2])
-            with col1:
-                # スレッド選択ボタン (プライマリ/セカンダリで見分ける)
-                if st.button(f"開く: {thread.name}", key=f"select_thread_button_{thread.id}", use_container_width=True,
-                              type="primary" if thread.id == selected_thread_id else "secondary"):
-                    st.session_state.current_thread_id = thread.id
-                    st.session_state.show_search_results = False # 検索表示解除
-                    st.rerun()
-            with col2:
-                # スレッド削除ボタン
-                if st.button("🗑️", key=f"delete_thread_button_{thread.id}", help="このスレッドを削除します"):
-                    delete_success = delete_thread(db, thread.id)
-                    if delete_success:
-                        st.success(f"スレッド '{thread.name}' を削除しました。")
-                        if st.session_state.current_thread_id == thread.id:
-                            st.session_state.current_thread_id = None
-                        st.rerun()
-                    else:
-                        st.error(f"スレッド '{thread.name}' の削除に失敗しました。")
-
-            st.sidebar.divider() # スレッド間の区切り線
+        # 「もっと表示する」ボタン
+        if len(threads) > st.session_state.visible_thread_count:
+            st.sidebar.divider()
+            if st.sidebar.button("もっと表示する"):
+                st.session_state.visible_thread_count += 10
+                st.rerun()
+        elif threads: # スレッドがあり、かつ全件表示されている場合
+            st.sidebar.divider()
+            st.sidebar.caption(f"全 {len(threads)} 件のスレッドを表示中")
 
     # --- ★検索機能 --- 
     st.sidebar.header("検索")
