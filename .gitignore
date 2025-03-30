@@ -1,2 +1,3 @@
 gemini_chat.db
 markdown_files/*
+.last_state.json
