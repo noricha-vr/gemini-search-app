@@ -31,6 +31,8 @@ if "project_to_edit_id" not in st.session_state:
     st.session_state.project_to_edit_id = None
 if "visible_thread_count" not in st.session_state:
     st.session_state.visible_thread_count = 5
+if "creating_project" not in st.session_state:
+    st.session_state.creating_project = False
 
 # --- 定数 --- # モデルリストを定義
 AVAILABLE_MODELS = [
@@ -69,36 +71,14 @@ try:
         st.session_state.current_project_id = None
         st.session_state.current_thread_id = None
 
-    # 新規プロジェクト作成
-    with st.sidebar.expander("新しいプロジェクトを作成"): 
-        new_project_name = st.text_input("プロジェクト名")
-        new_system_prompt = st.text_area("システムプロンプト", value="あなたは役立つアシスタントです。")
-        # モデル選択を削除 (要件変更)
-        # selected_model = st.selectbox("使用するモデルを選択", AVAILABLE_MODELS, index=0)
-        
-        if st.button("作成"):
-            # モデル選択のチェックを削除
-            if new_project_name:
-                # 同じ名前のプロジェクトがないか確認
-                existing_project = db.query(Project).filter(Project.name == new_project_name).first()
-                if not existing_project:
-                    new_project = Project(
-                        name=new_project_name, 
-                        system_prompt=new_system_prompt,
-                        # model_name=selected_model # モデル選択を削除
-                    )
-                    db.add(new_project)
-                    db.commit()
-                    db.refresh(new_project) # IDを取得するためにリフレッシュ
-                    st.session_state.current_project_id = new_project.id # 作成したプロジェクトを選択状態にする
-                    st.session_state.current_thread_id = None # 新規プロジェクト作成時はスレッド未選択
-                    st.sidebar.success(f"プロジェクト '{new_project_name}' を作成しました！")
-                    st.rerun() # サイドバーの表示を更新
-                else:
-                    st.sidebar.error("同じ名前のプロジェクトが既に存在します。")
-            else:
-                # メッセージを修正
-                st.sidebar.warning("プロジェクト名を入力してください。")
+    # --- 新規プロジェクト作成ボタン --- 
+    if st.sidebar.button("新しいプロジェクトを作成", key="create_project_button_sidebar"):
+        st.session_state.creating_project = True
+        st.session_state.editing_project = False # 他のモードは解除
+        st.session_state.show_search_results = False
+        st.session_state.current_project_id = None # プロジェクト選択も解除
+        st.session_state.current_thread_id = None
+        st.rerun()
 
     # --- プロジェクト削除ボタン --- (プロジェクトが選択されている場合)
     if st.session_state.current_project_id:
@@ -276,8 +256,46 @@ finally:
 
 # --- メインコンテンツエリア --- 
 
-# プロジェクト編集中かどうかで表示を切り替える (これが最優先)
-if st.session_state.editing_project and st.session_state.project_to_edit_id:
+# プロジェクト作成モードかどうか (最優先)
+if st.session_state.creating_project:
+    st.title("新しいプロジェクトを作成")
+    db = SessionLocal()
+    try:
+        with st.form(key="create_project_form"):
+            new_project_name = st.text_input("プロジェクト名")
+            new_system_prompt = st.text_area("システムプロンプト", value="あなたは役立つアシスタントです。", height=200)
+            
+            submitted = st.form_submit_button("作成")
+            if submitted:
+                if new_project_name and new_project_name.strip():
+                    # 同じ名前のプロジェクトがないか確認
+                    existing_project = db.query(Project).filter(Project.name == new_project_name.strip()).first()
+                    if not existing_project:
+                        new_project = Project(
+                            name=new_project_name.strip(), 
+                            system_prompt=new_system_prompt
+                        )
+                        db.add(new_project)
+                        db.commit()
+                        db.refresh(new_project) # IDを取得
+                        st.success(f"プロジェクト '{new_project.name}' を作成しました！")
+                        st.session_state.creating_project = False # 作成モード解除
+                        st.session_state.current_project_id = new_project.id # 作成したプロジェクトを選択
+                        st.session_state.current_thread_id = None # スレッドは未選択
+                        st.rerun()
+                    else:
+                        st.error("同じ名前のプロジェクトが既に存在します。")
+                else:
+                    st.warning("プロジェクト名を入力してください。")
+        
+        if st.button("キャンセル"):
+            st.session_state.creating_project = False
+            st.rerun()
+    finally:
+        db.close()
+
+# プロジェクト編集中かどうか (次に優先)
+elif st.session_state.editing_project and st.session_state.project_to_edit_id:
     st.title("プロジェクト編集")
     db = SessionLocal()
     try:
