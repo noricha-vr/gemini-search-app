@@ -183,5 +183,48 @@ def delete_project(db: Session, project_id: int) -> bool:
         logging.warning(f"削除対象のプロジェクト ID {project_id} が見つかりません。")
         return False
 
+def update_project(db: Session, project_id: int, new_name: str, new_system_prompt: str) -> bool:
+    """
+    指定された ID のプロジェクトの名前とシステムプロンプトを更新します。
+
+    Args:
+        db: SQLAlchemy セッションオブジェクト。
+        project_id: 更新するプロジェクトの ID。
+        new_name: 新しいプロジェクト名。
+        new_system_prompt: 新しいシステムプロンプト。
+
+    Returns:
+        更新が成功した場合は True、プロジェクトが見つからない場合や
+        名前が空または重複している場合は False。
+    """
+    if not new_name or not new_name.strip():
+        logging.warning(f"プロジェクト ID {project_id} の新しい名前が空です。")
+        return False
+
+    project_to_update = db.query(Project).filter(Project.id == project_id).first()
+    if project_to_update:
+        try:
+            # 名前が変更されているか、かつ新しい名前が他のプロジェクトで使われていないか確認
+            if project_to_update.name != new_name:
+                existing_project = db.query(Project).filter(Project.name == new_name, Project.id != project_id).first()
+                if existing_project:
+                    logging.error(f"プロジェクト名 '{new_name}' は既に別のプロジェクトで使用されています。")
+                    # エラーをユーザーに返す必要がある (例: False を返す)
+                    return False
+            
+            project_to_update.name = new_name
+            project_to_update.system_prompt = new_system_prompt
+            project_to_update.updated_at = datetime.datetime.utcnow() # 更新日時も更新
+            db.commit()
+            logging.info(f"プロジェクト ID {project_id} を更新しました。名前: '{new_name}")
+            return True
+        except Exception as e:
+            db.rollback()
+            logging.error(f"プロジェクト ID {project_id} の更新中にエラーが発生しました: {e}", exc_info=True)
+            return False
+    else:
+        logging.warning(f"更新対象のプロジェクト ID {project_id} が見つかりません。")
+        return False
+
 # 他の CRUD 操作関数もここに追加していく想定
 # (例: get_project, create_thread, get_messages_by_thread など) 

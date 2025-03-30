@@ -6,7 +6,7 @@ import datetime
 from google.genai import types
 import logging # logging をインポート
 from utils.markdown_export import export_message_to_markdown # <-- インポートを追加
-from database.crud import search_messages, delete_thread, update_thread_name, delete_project # <-- delete_project をインポート
+from database.crud import search_messages, delete_thread, update_thread_name, delete_project, update_project # <-- delete_project をインポート
 from sqlalchemy import func
 from utils.csv_export import get_all_data_as_dataframe, generate_csv_data # <-- CSVエクスポート関数をインポート
 
@@ -25,6 +25,10 @@ if "search_results" not in st.session_state:
     st.session_state.search_results = None # 検索結果を格納
 if "show_search_results" not in st.session_state:
     st.session_state.show_search_results = False # 検索結果表示モードのフラグ
+if "editing_project" not in st.session_state:
+    st.session_state.editing_project = False
+if "project_to_edit_id" not in st.session_state:
+    st.session_state.project_to_edit_id = None
 
 # --- 定数 --- # モデルリストを定義
 AVAILABLE_MODELS = [
@@ -96,14 +100,25 @@ try:
 
     # --- プロジェクト削除ボタン --- (プロジェクトが選択されている場合)
     if st.session_state.current_project_id:
-        st.sidebar.divider()
-        st.sidebar.subheader("プロジェクト操作")
         current_project_name = next((p.name for p in projects if p.id == st.session_state.current_project_id), "不明なプロジェクト")
-        if st.sidebar.button(f"🗑️ '{current_project_name}' を削除", key="delete_project_button"):
-            st.session_state.confirm_delete_project = True # 確認状態をセット
-            st.rerun() # 確認メッセージを表示するために再実行
+        
+        col_edit, col_delete = st.sidebar.columns(2) # 編集と削除ボタン用にカラムを作成
+        
+        # 編集ボタン
+        with col_edit:
+            if st.button("⚙️ 編集", key="edit_project_button", use_container_width=True):
+                st.session_state.editing_project = True
+                st.session_state.project_to_edit_id = st.session_state.current_project_id
+                st.session_state.show_search_results = False # 検索結果表示は解除
+                st.rerun() # メインエリアを編集フォーム表示に切り替え
+        
+        # 削除ボタン
+        with col_delete:
+            if st.button(f"🗑️ 削除", key="delete_project_button", use_container_width=True):
+                st.session_state.confirm_delete_project = True # 確認状態をセット
+                st.rerun() # 確認メッセージを表示するために再実行
 
-        # 確認メッセージの表示と最終削除処理
+        # 削除確認メッセージの表示と最終削除処理
         if st.session_state.get("confirm_delete_project", False):
             st.sidebar.warning(f"プロジェクト '{current_project_name}' を削除すると、関連する全てのスレッドとメッセージも削除されます。本当に削除しますか？")
             col1, col2 = st.sidebar.columns(2)
@@ -252,8 +267,44 @@ finally:
 
 # --- メインコンテンツエリア --- 
 
-# 検索結果表示モードかどうかで表示を切り替える
-if st.session_state.show_search_results:
+# プロジェクト編集中かどうかで表示を切り替える (これが最優先)
+if st.session_state.editing_project and st.session_state.project_to_edit_id:
+    st.title("プロジェクト編集")
+    db = SessionLocal()
+    try:
+        project_to_edit = db.query(Project).filter(Project.id == st.session_state.project_to_edit_id).first()
+        if project_to_edit:
+            with st.form(key="edit_project_form"):
+                st.write(f"プロジェクト ID: {project_to_edit.id}")
+                edited_name = st.text_input("プロジェクト名", value=project_to_edit.name)
+                edited_system_prompt = st.text_area("システムプロンプト", value=project_to_edit.system_prompt, height=200)
+                
+                submitted = st.form_submit_button("保存")
+                if submitted:
+                    update_success = update_project(db, project_to_edit.id, edited_name, edited_system_prompt)
+                    if update_success:
+                        st.success("プロジェクトを更新しました！")
+                        st.session_state.editing_project = False # 編集モード解除
+                        st.session_state.project_to_edit_id = None
+                        # 必要であれば現在のプロジェクト選択を維持または更新
+                        st.rerun()
+                    else:
+                        # update_project 内で重複エラーなどをログ出力しているので、ここでは汎用メッセージ
+                        st.error("プロジェクトの更新に失敗しました。名前が重複している可能性があります。")
+            
+            if st.button("キャンセル"):
+                st.session_state.editing_project = False
+                st.session_state.project_to_edit_id = None
+                st.rerun()
+        else:
+            st.error("編集対象のプロジェクトが見つかりません。")
+            st.session_state.editing_project = False
+            st.session_state.project_to_edit_id = None
+    finally:
+        db.close()
+
+# 次に検索結果表示モードかどうかをチェック
+elif st.session_state.show_search_results:
     st.title("検索結果")
     results = st.session_state.search_results
     if results:
