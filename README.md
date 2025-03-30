@@ -94,4 +94,5 @@
 
 ## 今後の開発予定 (Ideas)
 
--   Docker 対応
+-  Docker 対応
+- 全文検索時のUI改善
