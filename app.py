@@ -47,7 +47,13 @@ init_db()
 
 # --- ★★★ 初期状態設定 ★★★ ---
 def set_initial_state():
-    """アプリ起動時に最後の状態を復元し、新規スレッドを開始"""
+    """アプリ初回起動時に最後の状態を復元し、新規スレッドを開始"""
+    # 既に初期化済みであれば何もしない
+    if 'initial_state_complete' in st.session_state:
+        logging.debug("Initial state already set. Skipping.")
+        return
+    
+    logging.info("Performing initial state setup...")
     last_project_id = load_last_project_id()
     initial_project_id = None
     initial_thread_id = None
@@ -78,20 +84,19 @@ def set_initial_state():
             db.close()
 
     # --- セッション状態の初期化 --- (読み込んだ値で初期化)
-    if "current_project_id" not in st.session_state:
-        st.session_state.current_project_id = None
-    if "current_thread_id" not in st.session_state:
-        st.session_state.current_thread_id = None
-    if "search_results" not in st.session_state:
-        st.session_state.search_results = None # 検索結果を格納
-    if "show_search_results" not in st.session_state:
-        st.session_state.show_search_results = False # 検索結果表示モードのフラグ
-    if "editing_project" not in st.session_state:
-        st.session_state.editing_project = False
-    if "project_to_edit_id" not in st.session_state:
-        st.session_state.project_to_edit_id = None
-    if "creating_project" not in st.session_state:
-        st.session_state.creating_project = False
+    # この部分は初回のみ実行される
+    st.session_state.current_project_id = initial_project_id
+    st.session_state.current_thread_id = initial_thread_id
+    st.session_state.search_results = None
+    st.session_state.show_search_results = False
+    st.session_state.editing_project = False
+    st.session_state.project_to_edit_id = None
+    st.session_state.visible_thread_count = 5 # スレッド表示件数もここで初期化
+    st.session_state.creating_project = False
+    
+    # ★★★ 初期化完了フラグを立てる ★★★
+    st.session_state.initial_state_complete = True
+    logging.info("Initial state setup complete.")
 
 # アプリのメインロジック開始前に初期状態を設定
 set_initial_state()
