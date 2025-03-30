@@ -48,8 +48,8 @@
 
 1.  **リポジトリをクローン:**
     ```bash
-    git clone https://github.com/noricha-vr/gemini-search-app.git # リポジトリURLを確認してください
-    cd gemini-search-app
+    git clone https://github.com/noricha-vr/gemini-search-chat.git # リポジトリURLを確認してください
+    cd gemini-search-chat
     ```
 
 2.  **仮想環境の作成と有効化 (推奨):**
