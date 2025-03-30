@@ -122,6 +122,23 @@ AVAILABLE_MODELS = [
 # --- サイドバー --- 
 st.sidebar.title("Gemini Search Chat")
 
+# JavaScript for auto-focusing on chat input
+# 注: これはStreamlitの制限により完全には機能しない場合がありますが、試してみる価値があります
+js_focus_script = """
+<script>
+    // ページロード後に実行
+    document.addEventListener('DOMContentLoaded', function() {
+        // chat-inputクラスを持つ要素を探す (Streamlitのチャット入力欄の特徴的なクラス)
+        setTimeout(function() {
+            const chatInputs = document.querySelectorAll('textarea[data-testid="stChatInput"]');
+            if (chatInputs.length > 0) {
+                chatInputs[0].focus();
+            }
+        }, 500); // ページ読み込み完了後に少し待ってからフォーカス
+    });
+</script>
+"""
+
 # --- プロジェクト管理 --- 
 st.sidebar.header("プロジェクト")
 
@@ -230,9 +247,11 @@ try:
             # --- ★★★ 自動削除ここまで ★★★ ---
 
             st.session_state.current_thread_id = new_thread.id
-            # st.session_state.visible_thread_count = 5 # <-- 削除
-            st.sidebar.success("新規チャットを開始しました！")
-            st.rerun()
+            st.session_state.show_search_results = False # 検索結果表示中なら解除
+            st.session_state.creating_project = False # 他のモードも解除
+            st.session_state.editing_project = False
+            # st.sidebar.success("新規チャットを開始しました！") # サクセスメッセージは不要（画面遷移するため）
+            st.rerun() # 画面を更新して新しいチャットに移動
 
         # --- ★★★ 検索ボックスとボタンをここに移動 ★★★ ---
         col_search1, col_search2 = st.sidebar.columns([0.7, 0.3]) # 幅を調整
@@ -530,7 +549,8 @@ else:
                             "使用するモデル:", 
                             AVAILABLE_MODELS,
                             index=AVAILABLE_MODELS.index(st.session_state.selected_model) if st.session_state.selected_model in AVAILABLE_MODELS else 0,
-                            key="model_selector_main"  # <-- 一意なキーを追加
+                            key="model_selector_main",  # <-- 一意なキーを追加
+                            label_visibility="collapsed"  # ラベルを非表示に設定
                         )
 
                         # --- チャット履歴の表示 ---
@@ -539,6 +559,9 @@ else:
                             with st.chat_message(msg.role):
                                 st.markdown(msg.content) # マークダウンとして表示
 
+                        # チャット入力欄に自動フォーカスするJavaScriptを適用
+                        st.markdown(js_focus_script, unsafe_allow_html=True)
+                        
                         # --- ★★★ チャット入力と後続処理を復元 ★★★ ---
                         if prompt := st.chat_input("メッセージを入力してください"):
                             # 1. ユーザーメッセージを表示し、DBに保存
