@@ -54,7 +54,7 @@ init_db()
 
 # --- ★★★ 初期状態設定 ★★★ ---
 def set_initial_state():
-    """アプリ初回起動時に最後の状態を復元し、新規スレッドを開始"""
+    """アプリ初回起動時に最後の状態を復元し、新規チャットを開始"""
     # 既に初期化済みであれば何もしない
     if 'initial_state_complete' in st.session_state:
         logging.debug("Initial state already set. Skipping.")
@@ -72,9 +72,9 @@ def set_initial_state():
             last_project = db.query(Project).filter(Project.id == last_project_id).first()
             if last_project:
                 initial_project_id = last_project_id
-                # 新しいスレッドを作成
+                # 新しいチャットを作成
                 threads_count = db.query(func.count(Thread.id)).filter(Thread.project_id == initial_project_id).scalar() or 0
-                new_thread = Thread(project_id=initial_project_id, name=f"新しいスレッド {threads_count + 1}")
+                new_thread = Thread(project_id=initial_project_id, name=f"新しいチャット {threads_count + 1}")
                 db.add(new_thread)
                 db.commit()
                 db.refresh(new_thread)
@@ -98,7 +98,7 @@ def set_initial_state():
     st.session_state.show_search_results = False
     st.session_state.editing_project = False
     st.session_state.project_to_edit_id = None
-    st.session_state.visible_thread_count = 5 # スレッド表示件数もここで初期化
+    st.session_state.visible_thread_count = 5 # チャット表示件数もここで初期化
     st.session_state.creating_project = False
     
     # ★★★ 初期化完了フラグを立てる ★★★
@@ -138,7 +138,7 @@ try:
 
     if selected_project_name:
         new_project_id = project_map[selected_project_name]
-        # プロジェクトが切り替わったらスレッド選択もリセット & 状態保存
+        # プロジェクトが切り替わったらチャット選択もリセット & 状態保存
         if st.session_state.current_project_id != new_project_id:
              st.session_state.current_thread_id = None 
              st.session_state.current_project_id = new_project_id
@@ -185,7 +185,7 @@ try:
 
         # 削除確認メッセージの表示と最終削除処理
         if st.session_state.get("confirm_delete_project", False):
-            st.sidebar.warning(f"プロジェクト '{current_project_name}' を削除すると、関連する全てのスレッドとメッセージも削除されます。本当に削除しますか？")
+            st.sidebar.warning(f"プロジェクト '{current_project_name}' を削除すると、関連する全てのチャットとメッセージも削除されます。本当に削除しますか？")
             col1_confirm, col2_confirm = st.sidebar.columns(2)
             if col1_confirm.button("はい、削除します", key="confirm_delete_yes"):
                 delete_success = delete_project(db, current_project_id_for_ops)
@@ -204,34 +204,81 @@ try:
                 st.session_state.confirm_delete_project = False 
                 st.rerun()
 
-    # --- スレッド管理 --- (プロジェクトが選択されている場合のみ表示)
+    # --- チャット管理 --- (プロジェクトが選択されている場合のみ表示)
     if st.session_state.current_project_id:
-        st.sidebar.header("スレッド")
         current_project_id = st.session_state.current_project_id
         threads = db.query(Thread).filter(Thread.project_id == current_project_id).order_by(Thread.updated_at.desc()).all()
         # logging.info(f"[Sidebar Render] Fetched {len(threads)} threads for project {current_project_id}. Displaying up to {st.session_state.visible_thread_count}") # <-- ログ削除
 
-        # 新規スレッド作成ボタン
-        if st.sidebar.button("新しいスレッドを開始"):
-            new_thread = Thread(project_id=current_project_id, name=f"新しいスレッド {len(threads) + 1}") # 仮の名前
+        # 新規チャット作成ボタン
+        if st.sidebar.button("新規チャット"):
+            new_thread = Thread(project_id=current_project_id, name=f"新規チャット") # 仮の名前
             db.add(new_thread)
             db.commit()
             db.refresh(new_thread)
             st.session_state.current_thread_id = new_thread.id
             # st.session_state.visible_thread_count = 5 # <-- 削除
-            st.sidebar.success("新しいスレッドを開始しました！")
+            st.sidebar.success("新規チャットを開始しました！")
             st.rerun()
-        
-        st.sidebar.divider() # スレッドリストの前に区切り線
 
-        # スレッド一覧表示 (全件表示)
+        # --- ★★★ 検索ボックスとボタンをここに移動 ★★★ ---
+        col_search1, col_search2 = st.sidebar.columns([0.7, 0.3]) # 幅を調整
+        with col_search1:
+            search_query = st.text_input("メッセージを検索", key="search_input", label_visibility="collapsed") # ラベルを非表示に
+        with col_search2:
+            search_button_pressed = st.button("検索", key="search_button", use_container_width=True)
+
+        if search_button_pressed:
+            if search_query:
+                db_session = SessionLocal()
+                try:
+                    results = search_messages(db_session, search_query)
+                    # 結果を保存（プロジェクト名とチャット名も取得して付加する）
+                    detailed_results = []
+                    for msg in results:
+                        # 関連するチャットとプロジェクトを取得
+                        # N+1 問題を避けるため、本来は JOIN で取得する方が効率的
+                        thread = db_session.query(Thread).filter(Thread.id == msg.thread_id).first()
+                        project = db_session.query(Project).filter(Project.id == thread.project_id).first() if thread else None
+                        detailed_results.append({
+                            "message": msg,
+                            "thread_name": thread.name if thread else "不明なチャット",
+                            "project_name": project.name if project else "不明なプロジェクト",
+                            "project_id": thread.project_id if thread else None,
+                            "thread_id": msg.thread_id
+                        })
+                    st.session_state.search_results = detailed_results
+                    st.session_state.show_search_results = True 
+                    st.session_state.current_thread_id = None 
+                    st.session_state.editing_project = False # 他モード解除
+                    st.session_state.creating_project = False
+                    logging.debug(f"検索を実行しました: Query='{search_query}', Results={len(results)}")
+                    st.rerun() 
+                finally:
+                    db_session.close()
+            else:
+                st.sidebar.warning("検索キーワードを入力してください。")
+                st.session_state.show_search_results = False 
+                st.session_state.search_results = None
+
+        # 検索結果表示中はチャット表示に戻るボタンを出す (場所はここでもOK)
+        if st.session_state.show_search_results:
+            if st.sidebar.button("チャットに戻る", key="back_to_chat_button"):
+                st.session_state.show_search_results = False
+                st.session_state.search_results = None
+                st.rerun()
+        # --- ★★★ 検索機能 移動ここまで ★★★ ---
+
+        st.sidebar.divider() # チャットリストの前に区切り線
+
+        # チャット一覧表示 (全件表示)
         selected_thread_id = st.session_state.current_thread_id
         # threads_to_display = threads[:st.session_state.visible_thread_count] # <-- 削除
 
-        if not threads: # スレッドが全くない場合
-             st.sidebar.caption("まだスレッドがありません。")
+        if not threads: # チャットが全くない場合
+             st.sidebar.caption("まだチャットがありません。")
         else:
-            # スレッド名と削除ボタンを1行に表示
+            # チャット名と削除ボタンを1行に表示
             for thread in threads: # 全ての threads をループ
                 col1, col2 = st.sidebar.columns([0.8, 0.2])
                 with col1:
@@ -240,7 +287,7 @@ try:
                     message_count = message_count_query.scalar() or 0
                     thread_label = f"{thread.name} ({message_count} msgs)"
                     
-                    # スレッド選択ボタン
+                    # チャット選択ボタン
                     if st.button(thread_label, key=f"select_thread_{thread.id}", use_container_width=True,
                                   type="primary" if thread.id == selected_thread_id else "secondary"):
                         st.session_state.current_thread_id = thread.id
@@ -248,15 +295,15 @@ try:
                         st.session_state.editing_project = False 
                         st.rerun()
                 with col2:
-                    # スレッド削除ボタン
-                    if st.button("🗑️", key=f"delete_thread_{thread.id}", help="このスレッドを削除します"):
+                    # チャット削除ボタン
+                    if st.button("🗑️", key=f"delete_thread_{thread.id}", help="このチャットを削除します"):
                         thread_id_to_delete = thread.id 
                         thread_name_to_delete = thread.name 
                         logging.info(f"[Delete Button Clicked] Attempting to delete thread ID: {thread_id_to_delete}, Name: {thread_name_to_delete}") 
                         delete_success = delete_thread(db, thread_id_to_delete)
                         logging.info(f"[Delete Action] Deletion result for thread {thread_id_to_delete}: {delete_success}") 
                         if delete_success:
-                            st.sidebar.success(f"スレッド '{thread_name_to_delete}' を削除しました。") 
+                            st.sidebar.success(f"チャット '{thread_name_to_delete}' を削除しました。") 
                             current_selection = st.session_state.current_thread_id
                             if current_selection == thread_id_to_delete:
                                 st.session_state.current_thread_id = None
@@ -265,85 +312,39 @@ try:
                                 logging.info(f"[Delete Action] Deleted thread {thread_id_to_delete}, current selection {current_selection} remains.") 
                             st.rerun()
                         else:
-                            st.sidebar.error(f"スレッド '{thread_name_to_delete}' の削除に失敗しました。") 
+                            st.sidebar.error(f"チャット '{thread_name_to_delete}' の削除に失敗しました。") 
                 
-        st.sidebar.divider() # スレッドリストの後にも区切り線
+        st.sidebar.divider() # チャットリストの後にも区切り線
 
-        # --- ★ 全スレッド一括削除ボタン ★ --- 
-        if threads: # スレッドが存在する場合のみ表示
-            st.sidebar.divider() # 個別スレッドとの区切り
-            if st.sidebar.button("⚠️ このプロジェクトの全スレッドを削除", key="delete_all_threads_button"):
+        # --- ★ 全チャット一括削除ボタン ★ --- 
+        if threads: # チャットが存在する場合のみ表示
+            st.sidebar.divider() # 個別チャットとの区切り
+            if st.sidebar.button("⚠️ このプロジェクトの全チャット履歴を削除", key="delete_all_threads_button"):
                 st.session_state.confirm_delete_all_threads = True # 確認状態をセット
                 st.rerun()
 
             # 確認メッセージと最終削除処理
             if st.session_state.get("confirm_delete_all_threads", False):
                 current_project = db.query(Project).filter(Project.id == current_project_id).first() # プロジェクト名表示用
-                st.sidebar.warning(f"プロジェクト '{current_project.name if current_project else ''}' の全てのスレッド ({len(threads)}件) を削除します。本当によろしいですか？")
+                st.sidebar.warning(f"プロジェクト '{current_project.name if current_project else ''}' の全てのチャット履歴 ({len(threads)}件) を削除します。本当によろしいですか？")
                 col1_confirm_all, col2_confirm_all = st.sidebar.columns(2)
                 if col1_confirm_all.button("はい、全て削除します", key="confirm_delete_all_yes"):
                     delete_success = delete_all_threads_in_project(db, current_project_id)
                     if delete_success:
-                        st.sidebar.success("全ての関連スレッドを削除しました。")
-                        st.session_state.current_thread_id = None # スレッド選択解除
+                        st.sidebar.success("全ての関連チャット履歴を削除しました。")
+                        st.session_state.current_thread_id = None # チャット選択解除
                         st.session_state.confirm_delete_all_threads = False # 確認状態リセット
                         st.rerun()
                     else:
-                        st.sidebar.error("全スレッドの削除に失敗しました。")
+                        st.sidebar.error("全チャット履歴の削除に失敗しました。")
                         st.session_state.confirm_delete_all_threads = False # 確認状態リセット
                         st.rerun()
                 if col2_confirm_all.button("キャンセル", key="confirm_delete_all_no"):
                     st.session_state.confirm_delete_all_threads = False # 確認状態リセット
                     st.rerun()
         # --- ★ 一括削除ここまで ★ ---
-        else: # スレッドがない場合は区切り線だけ表示（任意）
+        else: # チャットがない場合は区切り線だけ表示（任意）
              st.sidebar.divider()
-
-    # --- ★検索機能 --- 
-    st.sidebar.header("検索")
-    search_query = st.sidebar.text_input("メッセージを検索", key="search_input")
-    if st.sidebar.button("検索実行", key="search_button"):
-        if search_query:
-            db_session = SessionLocal()
-            try:
-                results = search_messages(db_session, search_query)
-                # 結果を保存（プロジェクト名とスレッド名も取得して付加する）
-                detailed_results = []
-                for msg in results:
-                    # 関連するスレッドとプロジェクトを取得
-                    # N+1 問題を避けるため、本来は JOIN で取得する方が効率的
-                    thread = db_session.query(Thread).filter(Thread.id == msg.thread_id).first()
-                    project = db_session.query(Project).filter(Project.id == thread.project_id).first() if thread else None
-                    detailed_results.append({
-                        "message": msg,
-                        "thread_name": thread.name if thread else "不明なスレッド",
-                        "project_name": project.name if project else "不明なプロジェクト",
-                        "project_id": thread.project_id if thread else None,
-                        "thread_id": msg.thread_id
-                    })
-                st.session_state.search_results = detailed_results
-                st.session_state.show_search_results = True # 検索結果表示モードに
-                st.session_state.current_thread_id = None # 検索時は特定のスレッドを選択解除
-                logging.debug(f"検索を実行しました: Query='{search_query}', Results={len(results)}")
-                st.rerun() # メインエリアの表示を更新するため
-            finally:
-                db_session.close()
-        else:
-            st.sidebar.warning("検索キーワードを入力してください。")
-            st.session_state.show_search_results = False # 検索モード解除
-            st.session_state.search_results = None
-
-    # 検索結果表示中はチャット表示に戻るボタンを出す
-    if st.session_state.show_search_results:
-        if st.sidebar.button("チャットに戻る", key="back_to_chat_button"):
-            st.session_state.show_search_results = False
-            st.session_state.search_results = None
-            # 前回選択していたプロジェクト/スレッドに戻すか、あるいは単にクリアするか
-            # ここではクリアして、ユーザーに再度選択させる
-            # st.session_state.current_project_id = ... (保持していた場合)
-            # st.session_state.current_thread_id = ... (保持していた場合)
-            st.rerun()
-    # --- 検索機能ここまで ---
 
     # --- CSVエクスポート機能 --- 
     st.sidebar.divider()
@@ -393,10 +394,10 @@ if st.session_state.creating_project:
                         st.success(f"プロジェクト '{new_project.name}' を作成しました！")
                         st.session_state.creating_project = False 
                         st.session_state.current_project_id = new_project.id # 作成したプロジェクトを選択
-                        st.session_state.current_thread_id = None # スレッドは未選択のまま or 新規作成?
+                        st.session_state.current_thread_id = None # チャットは未選択のまま or 新規作成?
                         save_last_project_id(new_project.id) # ★状態保存
-                        # ここで新規スレッドも作成して選択状態にするか？ 要件に合わせて調整
-                        # 現状はプロジェクト選択のみ。次にリロードされると新規スレッドが作られる想定。
+                        # ここで新規チャットも作成して選択状態にするか？ 要件に合わせて調整
+                        # 現状はプロジェクト選択のみ。次にリロードされると新規チャットが作られる想定。
                         st.rerun()
                     else:
                         st.error("同じ名前のプロジェクトが既に存在します。")
@@ -456,8 +457,8 @@ elif st.session_state.show_search_results:
             with st.expander(f"**{result['project_name']}** / **{result['thread_name']}** ({msg.created_at.strftime('%Y-%m-%d %H:%M')}) - {msg.role}"):
                 st.markdown(f"> {msg.content[:100]}..." if len(msg.content) > 100 else f"> {msg.content}") # プレビュー
                 # st.markdown(msg.content) # 全文表示
-                # 検索結果から該当スレッドにジャンプするボタン
-                if st.button(f"このスレッドを開く ({result['thread_name']})", key=f"goto_thread_{msg.id}"):
+                # 検索結果から該当チャットにジャンプするボタン
+                if st.button(f"このチャットを開く ({result['thread_name']})", key=f"goto_thread_{msg.id}"):
                     st.session_state.current_project_id = result['project_id']
                     st.session_state.current_thread_id = result['thread_id']
                     st.session_state.show_search_results = False 
@@ -482,7 +483,7 @@ else:
                 if st.session_state.current_thread_id:
                     current_thread = db.query(Thread).filter(Thread.id == st.session_state.current_thread_id).first()
                     if current_thread:
-                        st.write(f"スレッド: {current_thread.name}")
+                        st.write(f"チャット: {current_thread.name}")
 
                         # --- モデル選択 (チャットエリア上部) ---
                         # セッションステートに選択モデルを保存
@@ -511,7 +512,7 @@ else:
                             user_message = Message(thread_id=current_thread.id, role="user", content=prompt)
                             db.add(user_message)
                             
-                            # スレッドの最終更新日時を更新
+                            # チャットの最終更新日時を更新
                             current_thread.updated_at = datetime.datetime.utcnow()
                             db.add(current_thread)
                             
@@ -583,7 +584,7 @@ else:
                                 assistant_message = Message(thread_id=current_thread.id, role="assistant", content=full_response)
                                 db.add(assistant_message)
                                 
-                                # スレッドの最終更新日時を再度更新
+                                # チャットの最終更新日時を再度更新
                                 current_thread.updated_at = datetime.datetime.utcnow()
                                 db.add(current_thread)
 
@@ -599,18 +600,18 @@ else:
                                 )
                                 # --- ★マークダウンエクスポートここまで ---
 
-                                # --- ★★★ スレッド名の自動設定 (最初のやり取り後) ★★★ ---
+                                # --- ★★★ チャット名の自動設定 (最初のやり取り後) ★★★ ---
                                 if not messages: # API呼び出し前のメッセージリストが空だったら
                                     new_thread_name = prompt[:20] # ユーザー入力の先頭20文字
                                     if new_thread_name:
-                                        logging.info(f"最初のやり取りを検出。スレッド ID {current_thread.id} の名前を自動設定: '{new_thread_name}'")
+                                        logging.info(f"最初のやり取りを検出。チャット ID {current_thread.id} の名前を自動設定: '{new_thread_name}'")
                                         # update_thread_name を直接呼び出すのではなく、セッションを再利用
                                         update_success = update_thread_name(db, current_thread.id, new_thread_name)
                                         if update_success:
                                             # 即時反映のため rerun
                                             st.rerun()
                                         else:
-                                            logging.warning("スレッド名の自動設定に失敗しました。")
+                                            logging.warning("チャット名の自動設定に失敗しました。")
                                 # --- ★★★ 自動設定ここまで ★★★ ---
 
                             except Exception as e:
@@ -618,10 +619,10 @@ else:
                         # --- ★★★ チャット入力復元ここまで ★★★ ---
 
                     else:
-                        st.warning("選択されたスレッドが見つかりません。")
+                        st.warning("選択されたチャットが見つかりません。")
                         st.session_state.current_thread_id = None # リセット
                 else:
-                    st.info("サイドバーからスレッドを選択または作成してください。")
+                    st.info("サイドバーからチャットを選択または作成してください。")
             else:
                 st.warning("選択されたプロジェクトが見つかりません。サイドバーからプロジェクトを選択または作成してください。")
                 st.session_state.current_project_id = None
