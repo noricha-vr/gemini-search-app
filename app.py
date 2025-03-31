@@ -403,11 +403,9 @@ try:
                         else:
                             st.sidebar.error(f"チャット '{thread_name_to_delete}' の削除に失敗しました。") 
                 
-        st.sidebar.divider() # チャットリストの後にも区切り線
 
         # --- ★ 全チャット一括削除ボタン ★ --- 
         if threads: # チャットが存在する場合のみ表示
-            st.sidebar.divider() # 個別チャットとの区切り
             if st.sidebar.button("⚠️ このプロジェクトの全チャット履歴を削除", key="delete_all_threads_button"):
                 st.session_state.confirm_delete_all_threads = True # 確認状態をセット
                 st.rerun()
