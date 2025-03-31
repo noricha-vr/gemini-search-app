@@ -221,9 +221,8 @@ try:
              st.session_state.current_project_id = None
              st.session_state.current_thread_id = None
              save_app_state(None) # 状態保存 (クリア)
-
     # --- 新規プロジェクト作成ボタン --- 
-    if st.sidebar.button("新しいプロジェクトを作成", key="create_project_button_sidebar"):
+    if st.sidebar.button("新しいプロジェクトを作成", key="create_project_button_sidebar", use_container_width=True):
         st.session_state.creating_project = True
         st.session_state.editing_project = False 
         st.session_state.show_search_results = False
@@ -280,7 +279,7 @@ try:
         # logging.info(f"[Sidebar Render] Fetched {len(threads)} threads for project {current_project_id}. Displaying up to {st.session_state.visible_thread_count}") # <-- ログ削除
 
         # 新規チャット作成ボタン
-        if st.sidebar.button("新規チャット"):
+        if st.sidebar.button("新規チャット", use_container_width=True):
             new_thread = Thread(project_id=current_project_id, name=f"新規チャット") # 仮の名前
             db.add(new_thread)
             db.commit()
@@ -302,6 +301,8 @@ try:
             st.session_state.editing_project = False
             # st.sidebar.success("新規チャットを開始しました！") # サクセスメッセージは不要（画面遷移するため）
             st.rerun() # 画面を更新して新しいチャットに移動
+
+        st.sidebar.divider()  # 検索の前に区切り線
 
         # --- ★★★ 検索ボックスとボタンをここに移動 ★★★ ---
         col_search1, col_search2 = st.sidebar.columns([0.7, 0.3]) # 幅を調整
@@ -351,7 +352,6 @@ try:
                 st.rerun()
         # --- ★★★ 検索機能 移動ここまで ★★★ ---
 
-        st.sidebar.divider() # チャットリストの前に区切り線
 
         # チャット一覧表示 (全件表示)
         selected_thread_id = st.session_state.current_thread_id
