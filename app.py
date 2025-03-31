@@ -358,8 +358,12 @@ try:
                     # スレッド名のみをラベルとして使用
                     thread_label = thread.name
                     
+                    # チャット名が長い場合は短縮して表示（20文字まで）
+                    max_text_length = 13 
+                    display_label = thread.name[:max_text_length] + "..." if len(thread.name) > max_text_length else thread.name
+                    
                     # チャット選択ボタン
-                    if st.button(thread_label, key=f"select_thread_{thread.id}", use_container_width=True,
+                    if st.button(display_label, key=f"select_thread_{thread.id}", use_container_width=True,
                                   type="primary" if thread.id == selected_thread_id else "secondary"):
                         st.session_state.current_thread_id = thread.id
                         st.session_state.show_search_results = False 
@@ -711,7 +715,7 @@ else:
 
                                 # --- ★★★ チャット名の自動設定 (最初のやり取り後) ★★★ ---
                                 if not messages: # API呼び出し前のメッセージリストが空だったら
-                                    new_thread_name = prompt[:20] # ユーザー入力の先頭20文字
+                                    new_thread_name = prompt[:60] # ユーザー入力の先頭60文字
                                     if new_thread_name:
                                         logging.info(f"最初のやり取りを検出。チャット ID {current_thread.id} の名前を自動設定: '{new_thread_name}'")
                                         # update_thread_name を直接呼び出すのではなく、セッションを再利用
