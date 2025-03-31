@@ -158,6 +158,20 @@ set_initial_state()
 # --- サイドバー --- 
 st.sidebar.title("Gemini Search Chat")
 
+# カスタムCSSの追加 - コードブロックの色を変更
+st.markdown("""
+<style>
+/* コードの色を変更 (深い緑色から明るい水色/シアンに) */
+code {
+    color: #00CCFF !important; /* 明るい水色/シアン */
+    background-color: rgba(0, 0, 0, 0.2) !important; /* コード背景を少し暗く */
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 16px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # JavaScript for auto-focusing on chat input
 # 注: これはStreamlitの制限により完全には機能しない場合がありますが、試してみる価値があります
 js_focus_script = """
