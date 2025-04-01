@@ -163,8 +163,6 @@ st.markdown("""
 <style>
 /* コードの色を変更 (深い緑色から明るい水色/シアンに) */
 code {
-    color: #00CCFF !important; /* 明るい水色/シアン */
-    background-color: rgba(0, 0, 0, 0.2) !important; /* コード背景を少し暗く */
     padding: 2px 4px;
     border-radius: 3px;
     font-size: 16px !important;
